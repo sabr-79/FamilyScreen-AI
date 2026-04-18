@@ -43,3 +43,5 @@ yarn-error.log*
 
 favicon.svg
 icons.svg
+
+.kiro/specs/familyscreen-ai-backend
