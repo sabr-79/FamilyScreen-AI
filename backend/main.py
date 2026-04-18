@@ -165,7 +165,8 @@ async def analyze_family_history(
         recommendations = await generate_screening_recommendations(
             family_history.patient_info, 
             risk_analysis,
-            uspstf_data
+            uspstf_data,
+            family_history
         )
         print(f"💡 Recommendations generated: {len(recommendations)}")
         
@@ -877,41 +878,47 @@ def calculate_rule_based_risk(family_history: FamilyHistoryInput) -> dict:
 async def generate_screening_recommendations(
     patient_info: PatientInfo, 
     risk_analysis: dict,
-    uspstf_data: dict
+    uspstf_data: dict,
+    family_history_input: FamilyHistoryInput
 ) -> List[ScreeningRecommendation]:
     """Generate personalized screening recommendations."""
     recommendations = []
-    
+
     for cancer_type, guidelines in uspstf_data.items():
-        # Skip gender-inappropriate screenings
         if cancer_type == "breast" and patient_info.sex.lower() == "male":
             continue
         if cancer_type == "cervical" and patient_info.sex.lower() == "male":
             continue
         if cancer_type == "prostate" and patient_info.sex.lower() == "female":
             continue
-        
+
         risk_level = RiskLevel(risk_analysis["risk_level"])
-        recommended_start_age = guidelines.get("high_risk_age" if risk_level in [RiskLevel.HIGH, RiskLevel.VERY_HIGH] else "standard_age", 50)
-        
-        # Age-appropriate recommendations
+
+        base_age = guidelines.get("standard_age", 50)
+        adjusted_age = base_age
+
+        for member in family_history_input.family_members:
+            if member.cancer_type.value == cancer_type:
+                if member.relationship in [RelationshipType.PARENT, RelationshipType.SIBLING]:
+                    adjusted_age = min(adjusted_age, max(25, member.age_at_diagnosis - 10))
+                elif member.relationship == RelationshipType.GRANDPARENT:
+                    adjusted_age = min(adjusted_age, max(25, base_age - 5))
+
+        recommended_start_age = adjusted_age
         if patient_info.age < 18:
-            # For minors: provide future guidance and current health focus
-            rationale = f"Due to significant family history (parent with {cancer_type} cancer at young age), genetic counseling is recommended now. Screening will begin at age {recommended_start_age}."
+            rationale = f"Due to significant family history, genetic counseling is recommended now. Screening will begin at age {recommended_start_age}."
             frequency = f"Genetic counseling now, then begin screening at age {recommended_start_age}"
             method = "1) Genetic counseling consultation 2) Future screening planning with oncology specialist"
         elif patient_info.age < recommended_start_age:
-            # For adults not yet at screening age: provide timeline
             years_until_screening = recommended_start_age - patient_info.age
             rationale = f"Based on {risk_analysis['risk_level']} risk level from family history, begin screening in {years_until_screening} years at age {recommended_start_age}"
             frequency = f"Begin {guidelines.get('frequency', 'regular screening')} at age {recommended_start_age}"
             method = f"Prepare for {guidelines.get('method', 'standard screening')}"
         else:
-            # For adults at or past screening age: standard recommendations
             rationale = f"Based on {risk_analysis['risk_level']} risk level from family history analysis"
             frequency = guidelines.get("frequency", "Consult physician")
             method = guidelines.get("method", "Standard screening")
-        
+
         recommendation = ScreeningRecommendation(
             cancer_type=CancerType(cancer_type),
             risk_level=risk_level,
@@ -921,8 +928,10 @@ async def generate_screening_recommendations(
             rationale=rationale
         )
         recommendations.append(recommendation)
-    
+
     return recommendations
+
+
 
 # def format_report_for_audio(report: RiskReport) -> str:
 #     """Format the risk report for audio narration."""
