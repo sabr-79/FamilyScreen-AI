@@ -14,7 +14,7 @@ load_dotenv()
 app = FastAPI(
     title="FamilyScreen AI Backend",
     description="AI agent that processes family cancer history and generates personalized screening recommendations",
-    version="1.0.0"
+    version="1.0.0.0.0"
 )
 
 # Get allowed origins from environment
