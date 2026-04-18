@@ -144,18 +144,30 @@ async def analyze_family_history(
     - Featherless AI: Risk analysis and recommendation generation
     """
     try:
+        print(f"👤 Processing family history for {patient_name}")
+        print(f"📊 Patient info: {family_history.patient_info.age}y, {family_history.patient_info.sex}")
+        print(f"👪 Family members: {len(family_history.family_members)}")
+        for member in family_history.family_members:
+            print(f"  - {member.relationship.value}: {member.cancer_type.value} at age {member.age_at_diagnosis}")
+        
         # Step 1: Use TinyFish agent to autonomously gather USPSTF guidelines
+        print("🔍 Step 1: Fetching USPSTF guidelines with TinyFish...")
         uspstf_data = await tinyfish_get_guidelines(family_history)
+        print(f"📋 USPSTF data: {list(uspstf_data.keys())}")
         
         # Step 2: Use Featherless AI to analyze family history and calculate risk
+        print("🤖 Step 2: Analyzing risk with Featherless AI...")
         risk_analysis = await featherless_analyze_risk(family_history, uspstf_data)
+        print(f"📈 Risk analysis: {risk_analysis.get('risk_level', 'unknown')}")
         
         # Step 3: Generate screening recommendations
+        print("🎯 Step 3: Generating screening recommendations...")
         recommendations = await generate_screening_recommendations(
             family_history.patient_info, 
             risk_analysis,
             uspstf_data
         )
+        print(f"💡 Recommendations generated: {len(recommendations)}")
         
         # Create comprehensive report with AI insights
         ai_insights_dict = None
@@ -371,12 +383,13 @@ async def tinyfish_get_guidelines(family_history: FamilyHistoryInput) -> dict:
     TinyFish fetches and extracts content from USPSTF website pages.
     """
     if not TINYFISH_API_KEY or not TINYFISH_API_KEY.strip():
-        # Fallback to mock data if TinyFish not configured
+        print("⚠️ TinyFish API key not configured, using mock data")
         return await mock_uspstf_guidelines(family_history)
     
     async with httpx.AsyncClient() as client:
         # Extract cancer types from family history
         cancer_types = list(set([member.cancer_type for member in family_history.family_members]))
+        print(f"🔍 TinyFish requested for cancer types: {[ct.value for ct in cancer_types]}")
         
         # USPSTF URLs for different cancer screening guidelines
         uspstf_urls = []
@@ -385,7 +398,8 @@ async def tinyfish_get_guidelines(family_history: FamilyHistoryInput) -> dict:
             "colorectal": "https://www.uspreventiveservicestaskforce.org/uspstf/recommendation/colorectal-cancer-screening",
             "lung": "https://www.uspreventiveservicestaskforce.org/uspstf/recommendation/lung-cancer-screening",
             "prostate": "https://www.uspreventiveservicestaskforce.org/uspstf/recommendation/prostate-cancer-screening",
-            "cervical": "https://www.uspreventiveservicestaskforce.org/uspstf/recommendation/cervical-cancer-screening"
+            "cervical": "https://www.uspreventiveservicestaskforce.org/uspstf/recommendation/cervical-cancer-screening",
+            "melanoma": "https://www.uspreventiveservicestaskforce.org/uspstf/recommendation/skin-cancer-screening"
         }
         
         # Build list of URLs to fetch
@@ -397,11 +411,13 @@ async def tinyfish_get_guidelines(family_history: FamilyHistoryInput) -> dict:
         if not uspstf_urls:
             uspstf_urls = ["https://www.uspreventiveservicestaskforce.org/uspstf/topic_search_results?topic_status=P"]
         
+        print(f"🌐 TinyFish fetching URLs: {uspstf_urls}")
+        
         try:
             # Use TinyFish Fetch API to get USPSTF content
             fetch_request = {
                 "urls": uspstf_urls,
-                "format": "markdown"  # Get clean markdown for easier parsing
+                "format": "markdown"
             }
             
             response = await client.post(
@@ -413,16 +429,18 @@ async def tinyfish_get_guidelines(family_history: FamilyHistoryInput) -> dict:
             response.raise_for_status()
             
             result = response.json()
+            print(f"✅ TinyFish API response received")
             
             # Parse the fetched USPSTF content
             if "results" in result and result["results"]:
+                print(f"📄 TinyFish returned {len(result['results'])} results")
                 return parse_uspstf_content(result["results"], cancer_types)
             else:
-                print(f"TinyFish returned no results: {result}")
+                print(f"⚠️ TinyFish returned no results: {result}")
                 return await mock_uspstf_guidelines(family_history)
                 
         except Exception as e:
-            print(f"TinyFish API error: {e}")
+            print(f"❌ TinyFish API error: {e}")
             return await mock_uspstf_guidelines(family_history)
 
 async def featherless_analyze_risk(family_history: FamilyHistoryInput, uspstf_data: dict) -> dict:
@@ -489,6 +507,7 @@ async def featherless_analyze_risk(family_history: FamilyHistoryInput, uspstf_da
         """
         
         try:
+            print(f"📡 Calling Featherless AI API...")
             response = await client.post(
                 f"{FEATHERLESS_BASE_URL}/chat/completions",
                 headers={"Authorization": f"Bearer {FEATHERLESS_API_KEY}"},
@@ -507,12 +526,14 @@ async def featherless_analyze_risk(family_history: FamilyHistoryInput, uspstf_da
                 timeout=30.0
             )
             response.raise_for_status()
+            print(f"✅ Featherless AI API call successful")
             
             ai_response = response.json()["choices"][0]["message"]["content"]
+            print(f"📝 Featherless AI response length: {len(ai_response)} chars")
             return parse_ai_risk_analysis(ai_response)
             
         except Exception as e:
-            print(f"Featherless AI error: {e}")
+            print(f"❌ Featherless AI error: {e}")
             return calculate_rule_based_risk(family_history)
 
 # Helper functions
@@ -551,10 +572,23 @@ def parse_ai_risk_analysis(ai_response: str) -> dict:
     import re
     
     try:
+        # Clean up the response - remove markdown code blocks if present
+        cleaned_response = ai_response.strip()
+        if cleaned_response.startswith("```"):
+            cleaned_response = re.sub(r'```json\s*|\s*```', '', cleaned_response)
+        
         # Try to extract JSON from the response
-        json_match = re.search(r'\{.*\}', ai_response, re.DOTALL)
+        json_match = re.search(r'\{.*\}', cleaned_response, re.DOTALL)
         if json_match:
             json_str = json_match.group()
+            
+            # Try to fix common JSON issues
+            # Fix missing closing braces
+            open_braces = json_str.count('{')
+            close_braces = json_str.count('}')
+            if open_braces > close_braces:
+                json_str += '}' * (open_braces - close_braces)
+            
             parsed = json.loads(json_str)
             
             # Ensure required fields exist
@@ -571,7 +605,7 @@ def parse_ai_risk_analysis(ai_response: str) -> dict:
             }
     except Exception as e:
         print(f"Error parsing AI response: {e}")
-        print(f"AI Response was: {ai_response}")
+        print(f"AI Response was: {ai_response[:500]}")  # Only print first 500 chars
     
     # Fallback parsing if JSON fails
     risk_level = "moderate"
@@ -593,6 +627,65 @@ def parse_ai_risk_analysis(ai_response: str) -> dict:
         "personalized_insights": ["Personalized analysis available - consult healthcare provider"],
         "confidence": 0.7
     }
+
+def parse_tinyfish_agent_result(agent_result, cancer_types) -> dict:
+    """Parse TinyFish Agent API result into our expected format."""
+    import json
+    import re
+    
+    guidelines = {}
+    
+    try:
+        # The agent result might be a string containing JSON or already parsed
+        if isinstance(agent_result, str):
+            # Try to extract JSON from the string
+            json_match = re.search(r'\{.*\}', agent_result, re.DOTALL)
+            if json_match:
+                agent_result = json.loads(json_match.group())
+        
+        if isinstance(agent_result, dict):
+            # Map the agent's response to our format
+            for cancer_type in cancer_types:
+                cancer_key = cancer_type.value
+                
+                # Check various possible keys the agent might use
+                possible_keys = [
+                    cancer_key,
+                    cancer_key.title(),
+                    cancer_key.replace("_", " ").title(),
+                    f"{cancer_key}_cancer",
+                    f"{cancer_key.title()} Cancer"
+                ]
+                
+                agent_data = None
+                for key in possible_keys:
+                    if key in agent_result:
+                        agent_data = agent_result[key]
+                        break
+                
+                if agent_data:
+                    guidelines[cancer_key] = {
+                        "standard_age": agent_data.get("standard_age") or agent_data.get("Standard Age") or 50,
+                        "high_risk_age": agent_data.get("high_risk_age") or agent_data.get("High‑Risk Age") or agent_data.get("High-Risk Age") or 40,
+                        "frequency": agent_data.get("frequency") or agent_data.get("Frequency") or "Consult physician",
+                        "method": agent_data.get("method") or agent_data.get("Method") or "Standard screening",
+                        "grade": agent_data.get("grade") or agent_data.get("Grade") or "N/A"
+                    }
+                else:
+                    # Use default if not found
+                    guidelines[cancer_key] = get_default_guideline(cancer_key)
+        
+        # If no guidelines were parsed, use defaults
+        if not guidelines:
+            for cancer_type in cancer_types:
+                guidelines[cancer_type.value] = get_default_guideline(cancer_type.value)
+        
+        return guidelines
+        
+    except Exception as e:
+        print(f"Error parsing TinyFish agent result: {e}")
+        # Return default guidelines for all requested cancer types
+        return {ct.value: get_default_guideline(ct.value) for ct in cancer_types}
 
 def parse_uspstf_content(fetch_results, cancer_types) -> dict:
     """Parse USPSTF content fetched by TinyFish into our expected format."""
