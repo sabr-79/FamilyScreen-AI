@@ -25,8 +25,8 @@ export async function POST(request: NextRequest) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
-      // Add signal for timeout (30 seconds)
-      signal: AbortSignal.timeout(30000)
+      // Add signal for timeout (90 seconds for TinyFish scraping)
+      signal: AbortSignal.timeout(90000)
     })
     
     console.log('[API Route] Backend response status:', backendResponse.status)
