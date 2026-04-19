@@ -1,5 +1,5 @@
 from typing import Annotated, List, Optional
-from fastapi import FastAPI, HTTPException, Depends, Query, Body
+from fastapi import FastAPI, HTTPException, Depends, Query, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import httpx
@@ -8,13 +8,14 @@ from datetime import datetime
 from enum import Enum
 import os
 from dotenv import load_dotenv
+from stripe_integration import StripeService
 
 load_dotenv()
 
 app = FastAPI(
     title="FamilyScreen AI Backend",
     description="AI agent that processes family cancer history and generates personalized screening recommendations",
-    version="1.0.0.0.0.0"
+    version="1.0.0"
 )
 
 # Get allowed origins from environment
@@ -127,8 +128,123 @@ def sponsors():
         "ai": "Featherless",
         "agent": "TinyFish",
         "voice": "ElevenLabs",
-        "ide": "Kiro"
+        "ide": "Kiro",
+        "payments": "Stripe"
     }
+
+# Stripe Subscription Endpoints
+@app.post("/create-checkout-session")
+async def create_checkout_session(
+    user_email: Annotated[str, Body()],
+    user_id: Annotated[str, Body()],
+    success_url: Annotated[str, Body()] = "https://your-app.com/success",
+    cancel_url: Annotated[str, Body()] = "https://your-app.com/cancel"
+):
+    """Create a Stripe checkout session for premium subscription"""
+    try:
+        # Debug: check keys are loaded
+        stripe_key = os.getenv("STRIPE_SECRET_KEY", "")
+        price_id = os.getenv("STRIPE_PRICE_ID", "")
+        print(f"🔑 Stripe key loaded: {'yes' if stripe_key else 'NO - MISSING'}")
+        print(f"💰 Price ID loaded: {price_id if price_id else 'NO - MISSING'}")
+
+        if not stripe_key:
+            raise HTTPException(status_code=500, detail="STRIPE_SECRET_KEY not configured")
+        if not price_id:
+            raise HTTPException(status_code=500, detail="STRIPE_PRICE_ID not configured")
+
+        session = await StripeService.create_checkout_session(
+            user_email=user_email,
+            user_id=user_id,
+            success_url=success_url,
+            cancel_url=cancel_url
+        )
+        return session
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Stripe checkout error: {type(e).__name__}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/create-portal-session")
+async def create_portal_session(
+    customer_id: Annotated[str, Body()],
+    return_url: Annotated[str, Body()] = "https://your-app.com/account"
+):
+    """Create a Stripe customer portal session"""
+    try:
+        session = await StripeService.create_customer_portal_session(
+            customer_id=customer_id,
+            return_url=return_url
+        )
+        return session
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/subscription-status/{customer_id}")
+async def get_subscription_status(customer_id: str):
+    """Get subscription status for a customer"""
+    try:
+        status = await StripeService.get_subscription_status(customer_id)
+        return status
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/webhook/stripe")
+async def stripe_webhook(request: Request):
+    """Handle Stripe webhooks"""
+    payload = await request.body()
+    sig_header = request.headers.get('stripe-signature')
+    
+    try:
+        event = StripeService.verify_webhook_signature(payload, sig_header)
+        
+        # Handle different event types
+        if event['type'] == 'checkout.session.completed':
+            session = event['data']['object']
+            # Update user to premium in database
+            print(f"✅ Subscription created for user: {session.get('client_reference_id')}")
+            
+        elif event['type'] == 'customer.subscription.deleted':
+            subscription = event['data']['object']
+            # Downgrade user from premium
+            print(f"❌ Subscription canceled for customer: {subscription.get('customer')}")
+            
+        elif event['type'] == 'customer.subscription.updated':
+            subscription = event['data']['object']
+            # Update subscription status
+            print(f"🔄 Subscription updated for customer: {subscription.get('customer')}")
+        
+        return {"status": "success"}
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+# Premium Feature: AI Health Assistant
+@app.post("/analyze-symptoms")
+async def analyze_symptoms(
+    symptoms: Annotated[str, Body()],
+    user_location: Annotated[Optional[str], Body()] = None
+):
+    """
+    Premium feature: Analyze general health symptoms and provide recommendations.
+    Uses TinyFish to scrape health information and Featherless AI for analysis.
+    """
+    try:
+        # Use Featherless AI to analyze symptoms
+        analysis = await analyze_symptoms_with_ai(symptoms, user_location)
+        
+        return {
+            "analysis": analysis["summary"],
+            "recommendations": analysis["recommendations"],
+            "vitamins": analysis["vitamins"],
+            "clinics": analysis.get("clinics", []),
+            "urgency_level": analysis["urgency_level"],
+            "disclaimer": "This analysis is for informational purposes only. Consult a healthcare provider for medical advice."
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error analyzing symptoms: {str(e)}")
 
 # Main API endpoints
 @app.post("/analyze-family-history", response_model=RiskReport)
@@ -165,8 +281,7 @@ async def analyze_family_history(
         recommendations = await generate_screening_recommendations(
             family_history.patient_info, 
             risk_analysis,
-            uspstf_data,
-            family_history
+            uspstf_data
         )
         print(f"💡 Recommendations generated: {len(recommendations)}")
         
@@ -351,6 +466,119 @@ def parse_ai_insights(ai_response: str) -> dict:
         "when_to_worry": ["Contact doctor if you notice any unusual symptoms"],
         "question_answers": [],
         "medical_terms_explained": []
+    }
+
+async def analyze_symptoms_with_ai(symptoms: str, user_location: Optional[str] = None) -> dict:
+    """Analyze general health symptoms using Featherless AI"""
+    if not FEATHERLESS_API_KEY or not FEATHERLESS_API_KEY.strip():
+        return {
+            "summary": "AI analysis unavailable. Please consult a healthcare provider.",
+            "recommendations": ["Consult with your primary care physician"],
+            "vitamins": [],
+            "urgency_level": "moderate"
+        }
+    
+    async with httpx.AsyncClient() as client:
+        analysis_prompt = f"""
+        You are a medical AI assistant. Analyze these symptoms and provide helpful guidance:
+        
+        SYMPTOMS: {symptoms}
+        LOCATION: {user_location or "Not specified"}
+        
+        Provide a comprehensive analysis in JSON format:
+        {{
+            "summary": "Brief analysis of symptoms",
+            "urgency_level": "low|moderate|high|emergency",
+            "recommendations": [
+                "Specific actionable recommendation 1",
+                "Specific actionable recommendation 2"
+            ],
+            "vitamins": [
+                {{"name": "Vitamin D", "reason": "May help with fatigue"}},
+                {{"name": "B12", "reason": "Supports energy levels"}}
+            ],
+            "lifestyle_changes": ["Change 1", "Change 2"],
+            "when_to_see_doctor": "Specific guidance on when to seek medical care",
+            "possible_conditions": ["Condition 1 (not a diagnosis)", "Condition 2"]
+        }}
+        
+        IMPORTANT: Be helpful but always emphasize this is not a diagnosis. Recommend seeing a doctor for persistent or severe symptoms.
+        """
+        
+        try:
+            response = await client.post(
+                f"{FEATHERLESS_BASE_URL}/chat/completions",
+                headers={"Authorization": f"Bearer {FEATHERLESS_API_KEY}"},
+                json={
+                    "model": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": "You are a helpful medical AI assistant. Provide accurate health information but always emphasize the importance of professional medical care. Respond with valid JSON only."
+                        },
+                        {"role": "user", "content": analysis_prompt}
+                    ],
+                    "temperature": 0.2,
+                    "max_tokens": 1500
+                },
+                timeout=25.0
+            )
+            
+            if response.status_code == 200:
+                ai_response = response.json()["choices"][0]["message"]["content"]
+                return parse_symptom_analysis(ai_response)
+            else:
+                return get_fallback_symptom_analysis()
+                
+        except Exception as e:
+            print(f"Symptom analysis error: {e}")
+            return get_fallback_symptom_analysis()
+
+def parse_symptom_analysis(ai_response: str) -> dict:
+    """Parse AI symptom analysis response"""
+    import json
+    import re
+    
+    try:
+        # Clean and extract JSON
+        json_match = re.search(r'\{.*\}', ai_response, re.DOTALL)
+        if json_match:
+            parsed = json.loads(json_match.group())
+            return {
+                "summary": parsed.get("summary", "Analysis completed"),
+                "urgency_level": parsed.get("urgency_level", "moderate"),
+                "recommendations": parsed.get("recommendations", []),
+                "vitamins": parsed.get("vitamins", []),
+                "lifestyle_changes": parsed.get("lifestyle_changes", []),
+                "when_to_see_doctor": parsed.get("when_to_see_doctor", "Consult a doctor if symptoms persist"),
+                "possible_conditions": parsed.get("possible_conditions", [])
+            }
+    except:
+        pass
+    
+    return get_fallback_symptom_analysis()
+
+def get_fallback_symptom_analysis() -> dict:
+    """Fallback symptom analysis"""
+    return {
+        "summary": "Thank you for sharing your symptoms. For a proper evaluation, please consult with a healthcare provider.",
+        "urgency_level": "moderate",
+        "recommendations": [
+            "Schedule an appointment with your primary care physician",
+            "Keep a symptom diary noting when symptoms occur",
+            "Stay hydrated and get adequate rest"
+        ],
+        "vitamins": [
+            {"name": "Multivitamin", "reason": "General nutritional support"},
+            {"name": "Vitamin D", "reason": "Supports immune function"}
+        ],
+        "lifestyle_changes": [
+            "Maintain a balanced diet",
+            "Get 7-9 hours of sleep",
+            "Exercise regularly"
+        ],
+        "when_to_see_doctor": "See a doctor if symptoms worsen or persist for more than a week",
+        "possible_conditions": []
     }
 
 # @app.post("/generate-audio-report")
@@ -878,47 +1106,41 @@ def calculate_rule_based_risk(family_history: FamilyHistoryInput) -> dict:
 async def generate_screening_recommendations(
     patient_info: PatientInfo, 
     risk_analysis: dict,
-    uspstf_data: dict,
-    family_history_input: FamilyHistoryInput
+    uspstf_data: dict
 ) -> List[ScreeningRecommendation]:
     """Generate personalized screening recommendations."""
     recommendations = []
-
+    
     for cancer_type, guidelines in uspstf_data.items():
+        # Skip gender-inappropriate screenings
         if cancer_type == "breast" and patient_info.sex.lower() == "male":
             continue
         if cancer_type == "cervical" and patient_info.sex.lower() == "male":
             continue
         if cancer_type == "prostate" and patient_info.sex.lower() == "female":
             continue
-
+        
         risk_level = RiskLevel(risk_analysis["risk_level"])
-
-        base_age = guidelines.get("standard_age", 50)
-        adjusted_age = base_age
-
-        for member in family_history_input.family_members:
-            if member.cancer_type.value == cancer_type:
-                if member.relationship in [RelationshipType.PARENT, RelationshipType.SIBLING]:
-                    adjusted_age = min(adjusted_age, max(25, member.age_at_diagnosis - 10))
-                elif member.relationship == RelationshipType.GRANDPARENT:
-                    adjusted_age = min(adjusted_age, max(25, base_age - 5))
-
-        recommended_start_age = adjusted_age
+        recommended_start_age = guidelines.get("high_risk_age" if risk_level in [RiskLevel.HIGH, RiskLevel.VERY_HIGH] else "standard_age", 50)
+        
+        # Age-appropriate recommendations
         if patient_info.age < 18:
-            rationale = f"Due to significant family history, genetic counseling is recommended now. Screening will begin at age {recommended_start_age}."
+            # For minors: provide future guidance and current health focus
+            rationale = f"Due to significant family history (parent with {cancer_type} cancer at young age), genetic counseling is recommended now. Screening will begin at age {recommended_start_age}."
             frequency = f"Genetic counseling now, then begin screening at age {recommended_start_age}"
             method = "1) Genetic counseling consultation 2) Future screening planning with oncology specialist"
         elif patient_info.age < recommended_start_age:
+            # For adults not yet at screening age: provide timeline
             years_until_screening = recommended_start_age - patient_info.age
             rationale = f"Based on {risk_analysis['risk_level']} risk level from family history, begin screening in {years_until_screening} years at age {recommended_start_age}"
             frequency = f"Begin {guidelines.get('frequency', 'regular screening')} at age {recommended_start_age}"
             method = f"Prepare for {guidelines.get('method', 'standard screening')}"
         else:
+            # For adults at or past screening age: standard recommendations
             rationale = f"Based on {risk_analysis['risk_level']} risk level from family history analysis"
             frequency = guidelines.get("frequency", "Consult physician")
             method = guidelines.get("method", "Standard screening")
-
+        
         recommendation = ScreeningRecommendation(
             cancer_type=CancerType(cancer_type),
             risk_level=risk_level,
@@ -928,10 +1150,8 @@ async def generate_screening_recommendations(
             rationale=rationale
         )
         recommendations.append(recommendation)
-
+    
     return recommendations
-
-
 
 # def format_report_for_audio(report: RiskReport) -> str:
 #     """Format the risk report for audio narration."""

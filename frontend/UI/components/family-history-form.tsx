@@ -211,85 +211,195 @@ export function FamilyHistoryForm() {
 
   // Show report if available
   if (report) {
+    const riskColor = (level: string) => {
+      if (level === "high" || level === "very_high") return { text: "#DC2626", bg: "#FEE2E2", border: "#FCA5A5", label: "High Risk" }
+      if (level === "moderate") return { text: "#CA8A04", bg: "#FEF9C3", border: "#FDE047", label: "Moderate Risk" }
+      return { text: "#16A34A", bg: "#DCFCE7", border: "#86EFAC", label: "Low Risk" }
+    }
+    const riskPct = (level: string) => {
+      if (level === "high" || level === "very_high") return "80%"
+      if (level === "moderate") return "55%"
+      return "25%"
+    }
+
     return (
-      <Card className="border-primary/20">
-        <CardHeader>
-          <CardTitle className="text-xl text-foreground">
-            Screening Recommendations for {report.patient_name}
-          </CardTitle>
-          <CardDescription>
-            Generated on {new Date(report.generated_date).toLocaleDateString()}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {/* Overall Summary */}
-          <div className="rounded-lg border border-primary/20 bg-primary/5 p-4">
-            <h3 className="font-semibold text-foreground">Overall Risk Summary</h3>
-            <p className="mt-2 text-sm text-muted-foreground">{report.overall_risk_summary}</p>
+      <div style={{ background: "#f8fafc", borderRadius: 16, overflow: "hidden" }}>
+        {/* Navy header */}
+        <div style={{
+          background: "linear-gradient(135deg, #0A1F44 0%, #112A5C 55%, #1E3A8A 100%)",
+          color: "white", padding: "32px 36px",
+          position: "relative", overflow: "hidden",
+        }}>
+          <div style={{
+            position: "absolute", inset: 0,
+            backgroundImage: "linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px)",
+            backgroundSize: "32px 32px", opacity: 0.5,
+          }} />
+          <div style={{ position: "relative" }}>
+            <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.2em", color: "#93C5FD" }}>CLINICAL SCREENING REPORT</div>
+            <h2 style={{ fontFamily: "'Georgia', serif", fontSize: 34, fontWeight: 600, letterSpacing: "-0.02em", margin: "8px 0 6px" }}>
+              {report.patient_name}&apos;s risk profile
+            </h2>
+            <div style={{ fontSize: 13, color: "#cbd5e1" }}>
+              📅 {new Date(report.generated_date).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}
+            </div>
+          </div>
+          <div style={{
+            position: "relative", marginTop: 26, paddingTop: 20,
+            borderTop: "0.5px solid rgba(255,255,255,0.15)",
+            display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 20,
+          }}>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.1em", color: "#94a3b8" }}>Conditions</div>
+              <div style={{ fontFamily: "'Georgia', serif", fontSize: 24, fontWeight: 600, marginTop: 4 }}>{report.recommendations.length}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.1em", color: "#94a3b8" }}>Elevated</div>
+              <div style={{ fontFamily: "'Georgia', serif", fontSize: 24, fontWeight: 600, marginTop: 4, color: "#FCA5A5" }}>
+                {report.recommendations.filter(r => r.risk_level === "high" || r.risk_level === "very_high").length}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.1em", color: "#94a3b8" }}>Next Steps</div>
+              <div style={{ fontFamily: "'Georgia', serif", fontSize: 24, fontWeight: 600, marginTop: 4 }}>{report.next_steps.length}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* White body */}
+        <div style={{ background: "white", padding: "32px 36px", border: "0.5px solid #e2e8f0", borderTop: 0 }}>
+          {/* Overall summary */}
+          <div style={{ marginBottom: 28 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+              <div style={{ width: 28, height: 28, background: "#0A1F44", borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center", color: "white" }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                </svg>
+              </div>
+              <h3 style={{ fontFamily: "'Georgia', serif", fontSize: 20, fontWeight: 600, color: "#0A1F44", margin: 0 }}>Overall Risk Summary</h3>
+            </div>
+            <div style={{ border: "0.5px solid rgba(37,99,235,0.15)", background: "#EFF6FF", borderRadius: 12, padding: 18 }}>
+              <p style={{ fontSize: 14, lineHeight: 1.6, color: "#334155", margin: 0 }}>{report.overall_risk_summary}</p>
+            </div>
           </div>
 
-          {/* Recommendations */}
-          <div className="space-y-4">
-            <h3 className="font-semibold text-foreground">Screening Recommendations</h3>
-            {report.recommendations.map((rec, index) => (
-              <div
-                key={index}
-                className="rounded-lg border border-border bg-muted/30 p-4"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-medium capitalize text-foreground">
-                    {rec.cancer_type.replace("_", " ")} Cancer
-                  </span>
-                  <span
-                    className={`rounded-full px-2 py-1 text-xs font-medium ${
-                      rec.risk_level === "high" || rec.risk_level === "very_high"
-                        ? "bg-destructive/10 text-destructive"
-                        : rec.risk_level === "moderate"
-                          ? "bg-yellow-500/10 text-yellow-600"
-                          : "bg-green-500/10 text-green-600"
-                    }`}
-                  >
-                    {rec.risk_level.replace("_", " ").toUpperCase()} RISK
-                  </span>
+          {/* Screening Recommendations */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+            <div style={{ width: 28, height: 28, background: "#0A1F44", borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center", color: "white" }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5z" />
+                <path d="M14 2v6h6" />
+              </svg>
+            </div>
+            <h3 style={{ fontFamily: "'Georgia', serif", fontSize: 20, fontWeight: 600, color: "#0A1F44", margin: 0 }}>Screening Recommendations</h3>
+          </div>
+
+          {report.recommendations.map((rec, index) => {
+            const colors = riskColor(rec.risk_level)
+            const pct = riskPct(rec.risk_level)
+            return (
+              <div key={index} style={{ border: "0.5px solid #e2e8f0", borderRadius: 14, padding: 24, marginBottom: 14 }}>
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+                  <div>
+                    <div style={{ fontFamily: "'Georgia', serif", fontSize: 20, fontWeight: 600, color: "#0A1F44" }}>
+                      {rec.cancer_type.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())} Cancer
+                    </div>
+                    <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{rec.screening_method}</div>
+                  </div>
+                  <div style={{
+                    borderRadius: 999, padding: "4px 12px",
+                    fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em",
+                    color: colors.text, background: colors.bg, border: `0.5px solid ${colors.border}`,
+                  }}>
+                    {colors.label}
+                  </div>
                 </div>
-                <div className="mt-3 grid gap-2 text-sm">
-                  <p>
-                    <span className="text-muted-foreground">Start screening at age:</span>{" "}
-                    <span className="font-medium text-foreground">{rec.recommended_age_start}</span>
-                  </p>
-                  <p>
-                    <span className="text-muted-foreground">Frequency:</span>{" "}
-                    <span className="font-medium text-foreground">{rec.screening_frequency}</span>
-                  </p>
-                  <p>
-                    <span className="text-muted-foreground">Method:</span>{" "}
-                    <span className="font-medium text-foreground">{rec.screening_method}</span>
-                  </p>
+
+                {/* Risk meter */}
+                <div style={{ marginTop: 20 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 11, color: "#64748b", fontWeight: 500 }}>
+                    <span>Risk Level</span>
+                    <span style={{ display: "flex", gap: 12 }}>
+                      {[["#16A34A", "Low"], ["#CA8A04", "Mod"], ["#DC2626", "High"]].map(([c, l]) => (
+                        <span key={l} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <span style={{ width: 6, height: 6, borderRadius: "50%", background: c, display: "inline-block" }} />{l}
+                        </span>
+                      ))}
+                    </span>
+                  </div>
+                  <div style={{ height: 10, background: "#f1f5f9", borderRadius: 999, overflow: "hidden" }}>
+                    <div style={{ width: pct, height: "100%", background: `linear-gradient(90deg, ${colors.text}cc 0%, ${colors.text} 100%)`, borderRadius: 999 }} />
+                  </div>
+                </div>
+
+                {/* Age comparison */}
+                <div style={{ marginTop: 22, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                  <div style={{ background: "#f8fafc", border: "0.5px solid #e2e8f0", borderRadius: 10, padding: "14px 16px" }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.1em", color: "#64748b" }}>USPSTF Standard</div>
+                    <div style={{ marginTop: 4, display: "flex", alignItems: "baseline", gap: 8 }}>
+                      <span style={{ fontFamily: "'Georgia', serif", fontSize: 32, fontWeight: 600, color: "#94a3b8" }}>
+                        {rec.cancer_type === "breast" ? 40 : rec.cancer_type === "colorectal" ? 45 : rec.cancer_type === "lung" ? 50 : "—"}
+                      </span>
+                      <span style={{ fontSize: 12, color: "#64748b" }}>years old</span>
+                    </div>
+                  </div>
+                  <div style={{ background: "#EFF6FF", border: "0.5px solid #BFDBFE", borderRadius: 10, padding: "14px 16px" }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.1em", color: "#2563EB" }}>Your Personalized Age</div>
+                    <div style={{ marginTop: 4, display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                      <span style={{ fontFamily: "'Georgia', serif", fontSize: 32, fontWeight: 700, color: "#2563EB" }}>{rec.recommended_age_start}</span>
+                      <span style={{ fontSize: 12, color: "#64748b" }}>years old</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ marginTop: 18, paddingTop: 18, borderTop: "0.5px solid #e2e8f0", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, fontSize: 13 }}>
+                  <div><span style={{ color: "#64748b" }}>Frequency: </span><span style={{ fontWeight: 500, color: "#0A1F44" }}>{rec.screening_frequency}</span></div>
+                  <div><span style={{ color: "#64748b" }}>Method: </span><span style={{ fontWeight: 500, color: "#0A1F44" }}>{rec.screening_method}</span></div>
                 </div>
               </div>
-            ))}
-          </div>
+            )
+          })}
 
           {/* Next Steps */}
-          <div className="space-y-3">
-            <h3 className="font-semibold text-foreground">Recommended Next Steps</h3>
-            <ul className="list-inside list-disc space-y-2 text-sm text-muted-foreground">
-              {report.next_steps.map((step, index) => (
-                <li key={index}>{step}</li>
-              ))}
-            </ul>
+          {report.next_steps.length > 0 && (
+            <div style={{ marginTop: 8, marginBottom: 24 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                <div style={{ width: 28, height: 28, background: "#0A1F44", borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center", color: "white" }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M9 11l3 3 8-8" /><path d="M20 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h11" />
+                  </svg>
+                </div>
+                <h3 style={{ fontFamily: "'Georgia', serif", fontSize: 20, fontWeight: 600, color: "#0A1F44", margin: 0 }}>Recommended Next Steps</h3>
+              </div>
+              <ul style={{ paddingLeft: 20, margin: 0 }}>
+                {report.next_steps.map((step, i) => (
+                  <li key={i} style={{ fontSize: 14, color: "#334155", lineHeight: 1.7, marginBottom: 4 }}>{step}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Actions */}
+          <div style={{ marginTop: 32, display: "flex", gap: 12 }}>
+            <button
+              onClick={() => window.print()}
+              style={{ flex: 1, height: 44, background: "white", border: "0.5px solid #e2e8f0", color: "#0A1F44", borderRadius: 10, fontSize: 14, fontWeight: 500, cursor: "pointer" }}
+            >
+              🖨 Print Report
+            </button>
+            <button
+              onClick={resetForm}
+              style={{ flex: 1, height: 44, background: "#0A1F44", border: 0, color: "white", borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: "pointer" }}
+            >
+              ↻ New Assessment
+            </button>
           </div>
 
-          {/* Disclaimer */}
-          <div className="rounded-lg border border-border bg-muted/50 p-4">
-            <p className="text-xs text-muted-foreground">{report.disclaimer}</p>
+          <div style={{ marginTop: 16, padding: 14, background: "#f8fafc", borderRadius: 10, border: "0.5px solid #e2e8f0" }}>
+            <p style={{ fontSize: 12, color: "#64748b", margin: 0 }}>{report.disclaimer}</p>
           </div>
-
-          <Button onClick={resetForm} variant="outline" className="w-full">
-            Start New Assessment
-          </Button>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     )
   }
 

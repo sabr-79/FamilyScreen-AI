@@ -17,6 +17,7 @@ typing_extensions==4.15.0
 uvicorn==0.44.0
 
 # Additional dependencies for FamilyScreen AI integrations
-python-multipart==0.0.6  # For file uploads if needed
-requests==2.31.0  # Backup HTTP client
-aiofiles==23.2.1  # For async file operations
+python-multipart==0.0.6
+requests==2.31.0
+aiofiles==23.2.1
+stripe==11.3.0
