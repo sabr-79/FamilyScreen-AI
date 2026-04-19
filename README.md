@@ -4,6 +4,6 @@
 
 ### Developed by Ridwaan A and Sabirin M
 
-<img width="1440" height="753" alt="Screenshot 2026-04-18 at 2 44 58 PM" src="https://github.com/user-attachments/assets/4ff75a4a-01cc-417c-a8a5-b5ec3f19b6d7" />
+<img width="1661" height="757" alt="image" src="https://github.com/user-attachments/assets/0a340193-470c-4912-8a68-adfaf628cd80" />
 
 ## Hosted on Render and Vercel 
