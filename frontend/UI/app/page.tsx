@@ -1,10 +1,10 @@
 "use client"
 
-import Link from "next/link"
 import { ShieldCheck, ArrowRight, FileText, Sparkles, Users } from "lucide-react"
 import { FamilyHistoryForm } from "@/components/family-history-form"
 import { HealthAssistant } from "@/components/health-assistant"
 import { UpgradeButton } from "@/components/upgrade-button"
+import { SponsorsSection } from "@/components/sponsors-section"
 
 export default function FamilyScreenAI() {
   const isPremium = false
@@ -279,22 +279,13 @@ export default function FamilyScreenAI() {
         </div>
       </section>
 
+      {/* ── SPONSORS SECTION ── */}
+      <SponsorsSection />
+
       {/* ── FOOTER ── */}
-      <footer style={{ background: "#0A1F44", color: "#cbd5e1", padding: "48px 48px 32px" }}>
+      <footer style={{ background: "#0A1F44", color: "#cbd5e1", padding: "32px 48px" }}>
         <div style={{ maxWidth: 1100, margin: "0 auto" }}>
-          <div style={{ textAlign: "center", fontSize: 11, letterSpacing: "0.18em", textTransform: "uppercase", color: "#94a3b8", marginBottom: 24 }}>
-            Powered by
-          </div>
-          <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 40, alignItems: "center", marginBottom: 40 }}>
-            {["TinyFish", "Featherless AI", "Stripe", "ElevenLabs", "Vercel", "Kiro"].map((name) => (
-              <div key={name} style={{ display: "flex", alignItems: "center", gap: 8, color: "#94a3b8" }}>
-                <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#64748b", display: "inline-block" }} />
-                <span style={{ fontFamily: "'Georgia', serif", fontSize: 17, fontWeight: 500 }}>{name}</span>
-              </div>
-            ))}
-          </div>
           <div style={{
-            borderTop: "0.5px solid rgba(255,255,255,0.08)", paddingTop: 20,
             display: "flex", justifyContent: "space-between",
             fontSize: 12, color: "#64748b", flexWrap: "wrap", gap: 8,
           }}>

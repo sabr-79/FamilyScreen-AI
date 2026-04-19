@@ -1110,7 +1110,45 @@ async def generate_screening_recommendations(
 ) -> List[ScreeningRecommendation]:
     """Generate personalized screening recommendations."""
     recommendations = []
-    
+
+    # USPSTF standard ages as fallback when TinyFish data is missing/unparseable
+    USPSTF_STANDARD_AGES = {
+        "breast": 40,
+        "colorectal": 45,
+        "lung": 50,
+        "cervical": 21,
+        "prostate": 50,
+        "melanoma": 35,
+        "ovarian": None,
+        "pancreatic": None,
+    }
+
+    # High-risk ages (when family history elevates risk)
+    HIGH_RISK_AGES = {
+        "breast": 30,       # 10 years before earliest first-degree diagnosis, min 25
+        "colorectal": 40,   # 10 years before earliest first-degree diagnosis, min 40
+        "lung": 45,
+        "cervical": 21,
+        "prostate": 40,
+        "melanoma": 25,
+        "ovarian": 30,
+        "pancreatic": 40,
+    }
+
+    def parse_age_from_guideline(value) -> int | None:
+        """Parse age from TinyFish guideline value which may be string like '50 to 80' or int."""
+        if value is None:
+            return None
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str):
+            # Handle "50 to 80" → take the lower bound
+            import re
+            nums = re.findall(r'\d+', value)
+            if nums:
+                return int(nums[0])
+        return None
+
     for cancer_type, guidelines in uspstf_data.items():
         # Skip gender-inappropriate screenings
         if cancer_type == "breast" and patient_info.sex.lower() == "male":
@@ -1119,28 +1157,55 @@ async def generate_screening_recommendations(
             continue
         if cancer_type == "prostate" and patient_info.sex.lower() == "female":
             continue
-        
+
         risk_level = RiskLevel(risk_analysis["risk_level"])
-        recommended_start_age = guidelines.get("high_risk_age" if risk_level in [RiskLevel.HIGH, RiskLevel.VERY_HIGH] else "standard_age", 50)
-        
-        # Age-appropriate recommendations
-        if patient_info.age < 18:
-            # For minors: provide future guidance and current health focus
-            rationale = f"Due to significant family history (parent with {cancer_type} cancer at young age), genetic counseling is recommended now. Screening will begin at age {recommended_start_age}."
-            frequency = f"Genetic counseling now, then begin screening at age {recommended_start_age}"
-            method = "1) Genetic counseling consultation 2) Future screening planning with oncology specialist"
-        elif patient_info.age < recommended_start_age:
-            # For adults not yet at screening age: provide timeline
-            years_until_screening = recommended_start_age - patient_info.age
-            rationale = f"Based on {risk_analysis['risk_level']} risk level from family history, begin screening in {years_until_screening} years at age {recommended_start_age}"
-            frequency = f"Begin {guidelines.get('frequency', 'regular screening')} at age {recommended_start_age}"
-            method = f"Prepare for {guidelines.get('method', 'standard screening')}"
+        is_high_risk = risk_level in [RiskLevel.HIGH, RiskLevel.VERY_HIGH]
+        is_moderate = risk_level == RiskLevel.MODERATE
+
+        # Try to get age from TinyFish data first, then fall back to our constants
+        if is_high_risk:
+            tinyfish_age = parse_age_from_guideline(guidelines.get("high_risk_age"))
+            fallback_age = HIGH_RISK_AGES.get(cancer_type)
+            recommended_start_age = tinyfish_age or fallback_age or USPSTF_STANDARD_AGES.get(cancer_type) or 50
+        elif is_moderate:
+            tinyfish_age = parse_age_from_guideline(guidelines.get("standard_age"))
+            fallback_age = USPSTF_STANDARD_AGES.get(cancer_type)
+            # For moderate risk, start 5 years earlier than standard
+            base = tinyfish_age or fallback_age or 50
+            recommended_start_age = max(base - 5, 25)
         else:
-            # For adults at or past screening age: standard recommendations
-            rationale = f"Based on {risk_analysis['risk_level']} risk level from family history analysis"
-            frequency = guidelines.get("frequency", "Consult physician")
-            method = guidelines.get("method", "Standard screening")
-        
+            # Low risk — use standard USPSTF age
+            tinyfish_age = parse_age_from_guideline(guidelines.get("standard_age"))
+            recommended_start_age = tinyfish_age or USPSTF_STANDARD_AGES.get(cancer_type) or 50
+
+        # Further adjust based on family history: if a first-degree relative was diagnosed
+        # young, recommend starting 10 years before their diagnosis age
+        family_members = risk_analysis.get("family_members_analyzed", [])
+        for member in family_members:
+            if (member.get("cancer_type") == cancer_type and
+                member.get("relationship") in ["parent", "sibling"] and
+                member.get("age_at_diagnosis")):
+                early_age = max(member["age_at_diagnosis"] - 10, 25)
+                recommended_start_age = min(recommended_start_age, early_age)
+
+        # Cap at reasonable bounds
+        recommended_start_age = max(recommended_start_age, 18)
+
+        # Build rationale and frequency
+        if patient_info.age < 18:
+            rationale = f"Due to significant family history, genetic counseling is recommended now. Screening will begin at age {recommended_start_age}."
+            frequency = f"Genetic counseling now, then begin screening at age {recommended_start_age}"
+            method = "Genetic counseling consultation + future screening planning"
+        elif patient_info.age < recommended_start_age:
+            years_until = recommended_start_age - patient_info.age
+            rationale = f"Based on {risk_analysis['risk_level'].replace('_', ' ')} risk from family history. Begin screening in {years_until} year{'s' if years_until != 1 else ''} at age {recommended_start_age}."
+            frequency = f"Begin {guidelines.get('frequency', 'regular screening')} at age {recommended_start_age}"
+            method = guidelines.get("method") or "Standard screening — consult your physician"
+        else:
+            rationale = f"Based on {risk_analysis['risk_level'].replace('_', ' ')} risk from family history analysis. Screening should begin now."
+            frequency = guidelines.get("frequency") or "Consult physician for schedule"
+            method = guidelines.get("method") or "Standard screening"
+
         recommendation = ScreeningRecommendation(
             cancer_type=CancerType(cancer_type),
             risk_level=risk_level,
@@ -1150,7 +1215,7 @@ async def generate_screening_recommendations(
             rationale=rationale
         )
         recommendations.append(recommendation)
-    
+
     return recommendations
 
 # def format_report_for_audio(report: RiskReport) -> str:

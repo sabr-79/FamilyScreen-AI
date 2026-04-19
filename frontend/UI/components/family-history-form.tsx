@@ -93,6 +93,7 @@ export function FamilyHistoryForm() {
   ])
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [report, setReport] = useState<RiskReport | null>(null)
+  const [submittedPatient, setSubmittedPatient] = useState<PatientInfo | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const addEntry = () => {
@@ -187,6 +188,7 @@ export function FamilyHistoryForm() {
       }
 
       const data: RiskReport = await response.json()
+      setSubmittedPatient({ ...patientInfo })
       setReport(data)
     } catch (err) {
       console.error("[v0] API Error:", err)
@@ -202,6 +204,7 @@ export function FamilyHistoryForm() {
 
   const resetForm = () => {
     setReport(null)
+    setSubmittedPatient(null)
     setError(null)
     setPatientInfo({ name: "", age: "", sex: "" })
     setEntries([
@@ -247,8 +250,20 @@ export function FamilyHistoryForm() {
           <div style={{
             position: "relative", marginTop: 26, paddingTop: 20,
             borderTop: "0.5px solid rgba(255,255,255,0.15)",
-            display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 20,
+            display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 20,
           }}>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.1em", color: "#94a3b8" }}>Age</div>
+              <div style={{ fontFamily: "'Georgia', serif", fontSize: 24, fontWeight: 600, marginTop: 4 }}>
+                {submittedPatient?.age ?? "—"}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.1em", color: "#94a3b8" }}>Sex</div>
+              <div style={{ fontFamily: "'Georgia', serif", fontSize: 24, fontWeight: 600, marginTop: 4 }}>
+                {submittedPatient?.sex ? submittedPatient.sex.charAt(0).toUpperCase() + submittedPatient.sex.slice(1) : "—"}
+              </div>
+            </div>
             <div>
               <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.1em", color: "#94a3b8" }}>Conditions</div>
               <div style={{ fontFamily: "'Georgia', serif", fontSize: 24, fontWeight: 600, marginTop: 4 }}>{report.recommendations.length}</div>
@@ -258,10 +273,6 @@ export function FamilyHistoryForm() {
               <div style={{ fontFamily: "'Georgia', serif", fontSize: 24, fontWeight: 600, marginTop: 4, color: "#FCA5A5" }}>
                 {report.recommendations.filter(r => r.risk_level === "high" || r.risk_level === "very_high").length}
               </div>
-            </div>
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.1em", color: "#94a3b8" }}>Next Steps</div>
-              <div style={{ fontFamily: "'Georgia', serif", fontSize: 24, fontWeight: 600, marginTop: 4 }}>{report.next_steps.length}</div>
             </div>
           </div>
         </div>
@@ -333,24 +344,40 @@ export function FamilyHistoryForm() {
                 </div>
 
                 {/* Age comparison */}
-                <div style={{ marginTop: 22, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-                  <div style={{ background: "#f8fafc", border: "0.5px solid #e2e8f0", borderRadius: 10, padding: "14px 16px" }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.1em", color: "#64748b" }}>USPSTF Standard</div>
-                    <div style={{ marginTop: 4, display: "flex", alignItems: "baseline", gap: 8 }}>
-                      <span style={{ fontFamily: "'Georgia', serif", fontSize: 32, fontWeight: 600, color: "#94a3b8" }}>
-                        {rec.cancer_type === "breast" ? 40 : rec.cancer_type === "colorectal" ? 45 : rec.cancer_type === "lung" ? 50 : "—"}
-                      </span>
-                      <span style={{ fontSize: 12, color: "#64748b" }}>years old</span>
+                {(() => {
+                  const uspstfAge = rec.cancer_type === "breast" ? 40 : rec.cancer_type === "colorectal" ? 45 : rec.cancer_type === "lung" ? 50 : null
+                  const yearsEarlier = uspstfAge && rec.recommended_age_start < uspstfAge ? uspstfAge - rec.recommended_age_start : null
+                  return (
+                    <div style={{ marginTop: 22, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                      <div style={{ background: "#f8fafc", border: "0.5px solid #e2e8f0", borderRadius: 10, padding: "14px 16px" }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.1em", color: "#64748b" }}>USPSTF Standard</div>
+                        <div style={{ marginTop: 4, display: "flex", alignItems: "baseline", gap: 8 }}>
+                          <span style={{
+                            fontFamily: "'Georgia', serif", fontSize: 32, fontWeight: 600, color: "#94a3b8",
+                            textDecoration: yearsEarlier ? "line-through" : "none",
+                            textDecorationColor: "#94a3b8",
+                            textDecorationThickness: 2,
+                          }}>
+                            {uspstfAge ?? "—"}
+                          </span>
+                          <span style={{ fontSize: 12, color: "#64748b" }}>years old</span>
+                        </div>
+                      </div>
+                      <div style={{ background: "#EFF6FF", border: "0.5px solid #BFDBFE", borderRadius: 10, padding: "14px 16px" }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.1em", color: "#2563EB" }}>Your Personalized Age</div>
+                        <div style={{ marginTop: 4, display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                          <span style={{ fontFamily: "'Georgia', serif", fontSize: 32, fontWeight: 700, color: "#2563EB" }}>{rec.recommended_age_start}</span>
+                          <span style={{ fontSize: 12, color: "#64748b" }}>years old</span>
+                          {yearsEarlier && (
+                            <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 600, color: "#2563EB", background: "white", border: "0.5px solid #BFDBFE", borderRadius: 999, padding: "2px 10px" }}>
+                              {yearsEarlier} yrs earlier
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                  <div style={{ background: "#EFF6FF", border: "0.5px solid #BFDBFE", borderRadius: 10, padding: "14px 16px" }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.1em", color: "#2563EB" }}>Your Personalized Age</div>
-                    <div style={{ marginTop: 4, display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-                      <span style={{ fontFamily: "'Georgia', serif", fontSize: 32, fontWeight: 700, color: "#2563EB" }}>{rec.recommended_age_start}</span>
-                      <span style={{ fontSize: 12, color: "#64748b" }}>years old</span>
-                    </div>
-                  </div>
-                </div>
+                  )
+                })()}
 
                 <div style={{ marginTop: 18, paddingTop: 18, borderTop: "0.5px solid #e2e8f0", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, fontSize: 13 }}>
                   <div><span style={{ color: "#64748b" }}>Frequency: </span><span style={{ fontWeight: 500, color: "#0A1F44" }}>{rec.screening_frequency}</span></div>

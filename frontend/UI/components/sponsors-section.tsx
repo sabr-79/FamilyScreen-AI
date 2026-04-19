@@ -1,5 +1,6 @@
 "use client"
 
+import Image from "next/image"
 import { Card, CardContent } from "@/components/ui/card"
 
 export function SponsorsSection() {
@@ -7,40 +8,58 @@ export function SponsorsSection() {
     {
       name: "TinyFish",
       description: "Autonomous web agent infrastructure",
-      logo: "🐟",
-      url: "https://tinyfish.ai"
+      logo: "https://tinyfish.ai/favicon.ico",
+      logoFallback: "🐟",
+      url: "https://tinyfish.ai",
+      logoBg: "#0f172a",
+      useEmoji: false,
     },
     {
       name: "Featherless AI",
       description: "Serverless AI inference",
-      logo: "🪶",
-      url: "https://featherless.ai"
+      logo: "",
+      logoFallback: "🪶",
+      url: "https://featherless.ai",
+      logoBg: "#6366f1",
+      useEmoji: true,
     },
     {
       name: "Stripe",
       description: "Payment infrastructure",
-      logo: "💳",
-      url: "https://stripe.com"
+      logo: "https://images.ctfassets.net/fzn2n1nzq965/HTTOloNPhisV9P4hlMPNA/cacf1bb88b9fc492dfad34378d844280/Stripe_icon_-_square.svg",
+      logoFallback: "💳",
+      url: "https://stripe.com",
+      logoBg: "#635bff",
+      useEmoji: false,
     },
     {
       name: "Vercel",
-      description: "Frontend deployment platform",
-      logo: "▲",
-      url: "https://vercel.com"
+      description: "Frontend deployment",
+      logo: "https://assets.vercel.com/image/upload/front/favicon/vercel/180x180.png",
+      logoFallback: "▲",
+      url: "https://vercel.com",
+      logoBg: "#000000",
+      useEmoji: false,
     },
     {
       name: "ElevenLabs",
       description: "AI voice technology",
-      logo: "🎙️",
+      logo: "https://elevenlabs.io/favicon-32x32.png",
+      logoFallback: "🎙️",
       url: "https://elevenlabs.io",
-      comingSoon: true
+      logoBg: "#000000",
+      comingSoon: true,
+      useEmoji: false,
     },
     {
       name: "Kiro",
       description: "AI-powered development",
-      logo: "🤖",
-      url: "https://kiro.ai"
-    }
+      logo: "",
+      logoFallback: "👻",
+      url: "https://kiro.ai",
+      logoBg: "#0ea5e9",
+      useEmoji: true,
+    },
   ]
 
   return (
@@ -53,7 +72,7 @@ export function SponsorsSection() {
           </p>
         </div>
 
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-6">
           {sponsors.map((sponsor) => (
             <a
               key={sponsor.name}
@@ -64,7 +83,21 @@ export function SponsorsSection() {
             >
               <Card className="transition-all hover:border-primary/50 hover:shadow-md">
                 <CardContent className="flex flex-col items-center p-6 text-center">
-                  <div className="mb-3 text-4xl">{sponsor.logo}</div>
+                  {/* Logo container */}
+                  <div
+                    className="mb-3 flex size-14 items-center justify-center overflow-hidden rounded-xl"
+                    style={{ background: sponsor.logoBg }}
+                  >
+                    {sponsor.useEmoji ? (
+                      <span style={{ fontSize: "28px" }}>{sponsor.logoFallback}</span>
+                    ) : (
+                      <LogoImage
+                        src={sponsor.logo}
+                        alt={sponsor.name}
+                        fallback={sponsor.logoFallback}
+                      />
+                    )}
+                  </div>
                   <h3 className="font-semibold text-foreground group-hover:text-primary">
                     {sponsor.name}
                   </h3>
@@ -86,10 +119,35 @@ export function SponsorsSection() {
           <p>
             FamilyScreen AI is made possible by these amazing technology partners.
             <br />
-            We're grateful for their support in making healthcare more accessible.
+            We&apos;re grateful for their support in making healthcare more accessible.
           </p>
         </div>
       </div>
     </section>
+  )
+}
+
+function LogoImage({ src, alt, fallback }: { src: string; alt: string; fallback: string }) {
+  return (
+    <img
+      src={src}
+      alt={alt}
+      width={36}
+      height={36}
+      style={{ objectFit: "contain", width: 36, height: 36 }}
+      onError={(e) => {
+        // If image fails to load, show fallback emoji
+        const target = e.currentTarget
+        target.style.display = "none"
+        const parent = target.parentElement
+        if (parent && !parent.querySelector(".fallback-emoji")) {
+          const span = document.createElement("span")
+          span.className = "fallback-emoji"
+          span.style.fontSize = "28px"
+          span.textContent = fallback
+          parent.appendChild(span)
+        }
+      }}
+    />
   )
 }
