@@ -340,6 +340,7 @@ async def analyze_family_history(
         print("🤖 Step 2: Analyzing risk with Featherless AI...")
         risk_analysis = await featherless_analyze_risk(family_history, uspstf_data)
         print(f"📈 Risk analysis: {risk_analysis.get('risk_level', 'unknown')}")
+        print(f"📊 Cancer-specific risks: {list(risk_analysis.get('cancer_specific_risks', {}).keys())}")
         
         # Step 3: Generate screening recommendations
         print("🎯 Step 3: Generating screening recommendations...")
@@ -349,6 +350,8 @@ async def analyze_family_history(
             uspstf_data
         )
         print(f"💡 Recommendations generated: {len(recommendations)}")
+        for rec in recommendations:
+            print(f"   - {rec.cancer_type.value}: {rec.risk_level.value} risk, age {rec.recommended_age_start}")
         
         # Create comprehensive report with AI insights
         ai_insights_dict = None
@@ -681,9 +684,18 @@ async def tinyfish_get_guidelines(family_history: FamilyHistoryInput) -> dict:
         return await mock_uspstf_guidelines(family_history)
     
     async with httpx.AsyncClient() as client:
-        # Extract cancer types from family history
-        cancer_types = list(set([member.cancer_type for member in family_history.family_members]))
-        print(f"🔍 TinyFish requested for cancer types: {[ct.value for ct in cancer_types]}")
+        # Get ALL major cancer types for comprehensive screening recommendations
+        # Not just those with family history
+        all_cancer_types = [
+            CancerType.BREAST,
+            CancerType.COLORECTAL,
+            CancerType.LUNG,
+            CancerType.CERVICAL,
+            CancerType.PROSTATE,
+            CancerType.MELANOMA
+        ]
+        
+        print(f"🔍 TinyFish fetching guidelines for ALL cancer types: {[ct.value for ct in all_cancer_types]}")
         
         # USPSTF URLs for different cancer screening guidelines
         uspstf_urls = []
@@ -696,14 +708,11 @@ async def tinyfish_get_guidelines(family_history: FamilyHistoryInput) -> dict:
             "melanoma": "https://www.uspreventiveservicestaskforce.org/uspstf/recommendation/skin-cancer-screening"
         }
         
-        # Build list of URLs to fetch
-        for cancer_type in cancer_types:
+        # Build list of URLs to fetch for ALL cancer types
+        uspstf_urls = []
+        for cancer_type in all_cancer_types:
             if cancer_type.value in cancer_url_map:
                 uspstf_urls.append(cancer_url_map[cancer_type.value])
-        
-        # If no specific URLs found, use general screening page
-        if not uspstf_urls:
-            uspstf_urls = ["https://www.uspreventiveservicestaskforce.org/uspstf/topic_search_results?topic_status=P"]
         
         print(f"🌐 TinyFish fetching URLs: {uspstf_urls}")
         
@@ -714,27 +723,60 @@ async def tinyfish_get_guidelines(family_history: FamilyHistoryInput) -> dict:
                 "format": "markdown"
             }
             
+            print(f"📤 TinyFish request payload: {fetch_request}")
+            print(f"📤 TinyFish API endpoint: {TINYFISH_BASE_URL}")
+            print(f"📤 TinyFish API key present: {bool(TINYFISH_API_KEY)}")
+            
             response = await client.post(
                 TINYFISH_BASE_URL,
-                headers={"X-API-Key": TINYFISH_API_KEY},
+                headers={
+                    "X-API-Key": TINYFISH_API_KEY,
+                    "Content-Type": "application/json"
+                },
                 json=fetch_request,
-                timeout=30.0
+                timeout=60.0  # Increased timeout for web scraping
             )
-            response.raise_for_status()
+            
+            print(f"📥 TinyFish response status: {response.status_code}")
+            
+            if response.status_code != 200:
+                error_text = response.text
+                print(f"❌ TinyFish API error response: {error_text}")
+                print(f"❌ Response headers: {response.headers}")
+                response.raise_for_status()
             
             result = response.json()
             print(f"✅ TinyFish API response received")
             
+            # Check for errors in the response
+            if "errors" in result and result["errors"]:
+                print(f"⚠️ TinyFish returned errors: {result['errors']}")
+            
             # Parse the fetched USPSTF content
             if "results" in result and result["results"]:
                 print(f"📄 TinyFish returned {len(result['results'])} results")
-                return parse_uspstf_content(result["results"], cancer_types)
+                # Log first result for debugging
+                if result["results"]:
+                    first_result = result["results"][0]
+                    print(f"📄 First result URL: {first_result.get('url')}")
+                    print(f"📄 First result title: {first_result.get('title')}")
+                    print(f"📄 First result text length: {len(first_result.get('text', ''))} chars")
+                return parse_uspstf_content(result["results"], all_cancer_types)
             else:
-                print(f"⚠️ TinyFish returned no results: {result}")
+                print(f"⚠️ TinyFish returned no results in response: {result}")
                 return await mock_uspstf_guidelines(family_history)
                 
+        except httpx.HTTPStatusError as e:
+            print(f"❌ TinyFish HTTP error: {e.response.status_code}")
+            print(f"❌ Response body: {e.response.text}")
+            return await mock_uspstf_guidelines(family_history)
+        except httpx.TimeoutException as e:
+            print(f"❌ TinyFish timeout error: {e}")
+            return await mock_uspstf_guidelines(family_history)
         except Exception as e:
-            print(f"❌ TinyFish API error: {e}")
+            print(f"❌ TinyFish API error: {type(e).__name__}: {e}")
+            import traceback
+            print(f"❌ Traceback: {traceback.format_exc()}")
             return await mock_uspstf_guidelines(family_history)
 
 async def featherless_analyze_risk(family_history: FamilyHistoryInput, uspstf_data: dict) -> dict:
@@ -769,22 +811,50 @@ async def featherless_analyze_risk(family_history: FamilyHistoryInput, uspstf_da
         {format_uspstf_for_ai(uspstf_data)}
 
         ANALYSIS REQUIRED:
-        1. Calculate personalized risk level for each relevant cancer type (low/moderate/high/very_high)
-        2. Identify key risk factors and protective factors
-        3. Assess hereditary cancer syndrome probability
-        4. Provide age-appropriate recommendations (especially important if patient is under 18)
-        5. Determine if genetic counseling is recommended
-        6. Generate personalized insights and lifestyle recommendations
-        7. If patient is a minor, focus on current health habits and family planning
+        1. Calculate personalized risk level for EACH cancer type separately (low/moderate/high/very_high)
+        2. For cancers WITH family history: assess as moderate/high/very_high based on relationship and age
+        3. For cancers WITHOUT family history: assess as low risk
+        4. Identify key risk factors and protective factors
+        5. Assess hereditary cancer syndrome probability
+        6. Provide age-appropriate recommendations
+        7. Determine if genetic counseling is recommended
 
         RESPOND IN THIS EXACT JSON FORMAT:
         {{
             "overall_risk_level": "low|moderate|high|very_high",
             "risk_summary": "Detailed explanation of overall risk assessment",
             "cancer_specific_risks": {{
-                "cancer_type": {{
+                "breast": {{
                     "risk_level": "low|moderate|high|very_high",
-                    "rationale": "Explanation for this specific cancer risk"
+                    "rationale": "Explanation for breast cancer risk"
+                }},
+                "colorectal": {{
+                    "risk_level": "low|moderate|high|very_high",
+                    "rationale": "Explanation for colorectal cancer risk"
+                }},
+                "lung": {{
+                    "risk_level": "low",
+                    "rationale": "No family history"
+                }},
+                "cervical": {{
+                    "risk_level": "low",
+                    "rationale": "No family history"
+                }},
+                "prostate": {{
+                    "risk_level": "low",
+                    "rationale": "No family history"
+                }},
+                "melanoma": {{
+                    "risk_level": "low",
+                    "rationale": "No family history"
+                }},
+                "ovarian": {{
+                    "risk_level": "low",
+                    "rationale": "No family history"
+                }},
+                "pancreatic": {{
+                    "risk_level": "low",
+                    "rationale": "No family history"
                 }}
             }},
             "key_risk_factors": ["factor1", "factor2"],
@@ -798,6 +868,13 @@ async def featherless_analyze_risk(family_history: FamilyHistoryInput, uspstf_da
             ],
             "confidence_level": 0.85
         }}
+        
+        IMPORTANT: 
+        - Provide risk assessment for ALL 8 cancer types listed above
+        - Cancers WITH family history should be moderate/high/very_high
+        - Cancers WITHOUT family history should be low
+        - First-degree relatives (parent/sibling) with early diagnosis (<50) = high/very_high risk
+        - Second-degree relatives (grandparent/aunt/uncle) = moderate risk
         """
         
         try:
@@ -1008,11 +1085,13 @@ def parse_uspstf_content(fetch_results, cancer_types) -> dict:
                 # Extract key information from the USPSTF text
                 guideline = extract_screening_info(text, cancer_type)
                 guidelines[cancer_type] = guideline
+                print(f"📄 Parsed {cancer_type}: standard_age={guideline.get('standard_age')}, method={guideline.get('method')}")
         
         # Fill in any missing cancer types with defaults
         for cancer_type in cancer_types:
             if cancer_type.value not in guidelines:
                 guidelines[cancer_type.value] = get_default_guideline(cancer_type.value)
+                print(f"📄 Using default for {cancer_type.value}")
         
         return guidelines
         
@@ -1023,26 +1102,52 @@ def parse_uspstf_content(fetch_results, cancer_types) -> dict:
 
 def extract_screening_info(text: str, cancer_type: str) -> dict:
     """Extract screening information from USPSTF text content."""
-    # Simple text parsing to extract key information
-    # In production, you'd use more sophisticated NLP
+    import re
     
     text_lower = text.lower()
     
     # Default values
     guideline = get_default_guideline(cancer_type)
     
-    # Look for age recommendations
-    if "age 40" in text_lower or "40 years" in text_lower:
-        if "high risk" in text_lower or "increased risk" in text_lower:
-            guideline["high_risk_age"] = 40
-        else:
+    # Look for specific age recommendations based on cancer type
+    # Use regex to find age patterns more accurately
+    
+    # For breast cancer, look for "women aged 40" or "starting at age 40"
+    if cancer_type == "breast":
+        # Look for the main recommendation age
+        if re.search(r'women aged? (40|50)', text_lower):
+            match = re.search(r'women aged? (\d+)', text_lower)
+            if match:
+                guideline["standard_age"] = int(match.group(1))
+        # Biennial screening for women 40-74
+        if "40 to 74" in text_lower or "40-74" in text_lower:
             guideline["standard_age"] = 40
     
-    if "age 45" in text_lower or "45 years" in text_lower:
-        guideline["standard_age"] = 45
+    elif cancer_type == "colorectal":
+        # Look for "adults aged 45" or "starting at 45"
+        if re.search(r'adults? aged? 45', text_lower) or "starting at 45" in text_lower:
+            guideline["standard_age"] = 45
+        elif "45 to 75" in text_lower or "45-75" in text_lower:
+            guideline["standard_age"] = 45
     
-    if "age 50" in text_lower or "50 years" in text_lower:
-        guideline["standard_age"] = 50
+    elif cancer_type == "cervical":
+        # Cervical screening starts at 21
+        if "age 21" in text_lower or "aged 21" in text_lower:
+            guideline["standard_age"] = 21
+    
+    elif cancer_type == "lung":
+        # Lung screening typically 50-80
+        if "50 to 80" in text_lower or "50-80" in text_lower or "aged 50" in text_lower:
+            guideline["standard_age"] = 50
+    
+    elif cancer_type == "prostate":
+        # Prostate screening discussion 55-69
+        if "55 to 69" in text_lower or "55-69" in text_lower:
+            guideline["standard_age"] = 55
+    
+    elif cancer_type == "melanoma":
+        # Skin cancer screening - no specific USPSTF age, use default
+        pass
     
     # Look for frequency information
     if "annual" in text_lower or "every year" in text_lower:
@@ -1051,6 +1156,8 @@ def extract_screening_info(text: str, cancer_type: str) -> dict:
         guideline["frequency"] = "Every 2 years"
     elif "every 3 years" in text_lower or "every three years" in text_lower:
         guideline["frequency"] = "Every 3 years"
+    elif "every 5 years" in text_lower or "every five years" in text_lower:
+        guideline["frequency"] = "Every 5 years"
     elif "every 10 years" in text_lower or "every ten years" in text_lower:
         guideline["frequency"] = "Every 10 years"
     
@@ -1063,6 +1170,8 @@ def extract_screening_info(text: str, cancer_type: str) -> dict:
         guideline["method"] = "Pap smear"
     elif cancer_type == "lung" and ("ct" in text_lower or "computed tomography" in text_lower):
         guideline["method"] = "Low-dose CT scan"
+    elif cancer_type == "prostate" and ("psa" in text_lower):
+        guideline["method"] = "PSA test"
     
     return guideline
 
@@ -1098,6 +1207,24 @@ def get_default_guideline(cancer_type: str) -> dict:
             "high_risk_age": 21,
             "frequency": "Every 3 years",
             "method": "Pap smear"
+        },
+        "melanoma": {
+            "standard_age": 35,
+            "high_risk_age": 25,
+            "frequency": "Annually",
+            "method": "Skin exam"
+        },
+        "ovarian": {
+            "standard_age": 50,
+            "high_risk_age": 30,
+            "frequency": "Consult physician",
+            "method": "Consult physician"
+        },
+        "pancreatic": {
+            "standard_age": 50,
+            "high_risk_age": 40,
+            "frequency": "Consult physician",
+            "method": "Consult physician"
         }
     }
     
@@ -1173,31 +1300,43 @@ async def generate_screening_recommendations(
     risk_analysis: dict,
     uspstf_data: dict
 ) -> List[ScreeningRecommendation]:
-    """Generate personalized screening recommendations."""
+    """Generate personalized screening recommendations for ALL cancer types."""
     recommendations = []
 
-    # USPSTF standard ages as fallback when TinyFish data is missing/unparseable
+    # USPSTF standard ages
     USPSTF_STANDARD_AGES = {
-        "breast": 40,
+        "breast": 40,  # USPSTF standard is 40 (will show as 50 in UI for display)
         "colorectal": 45,
         "lung": 50,
         "cervical": 21,
         "prostate": 50,
         "melanoma": 35,
-        "ovarian": None,
-        "pancreatic": None,
+        "ovarian": 50,
+        "pancreatic": 50,
     }
 
-    # High-risk ages (when family history elevates risk)
-    HIGH_RISK_AGES = {
-        "breast": 30,       # 10 years before earliest first-degree diagnosis, min 25
-        "colorectal": 40,   # 10 years before earliest first-degree diagnosis, min 40
-        "lung": 45,
-        "cervical": 21,
-        "prostate": 40,
-        "melanoma": 25,
-        "ovarian": 30,
-        "pancreatic": 40,
+    # Standard screening methods
+    STANDARD_METHODS = {
+        "breast": "Mammography",
+        "colorectal": "Colonoscopy",
+        "lung": "Low-dose CT scan",
+        "cervical": "Pap smear",
+        "prostate": "PSA test",
+        "melanoma": "Skin exam",
+        "ovarian": "Consult physician",
+        "pancreatic": "Consult physician",
+    }
+
+    # Standard frequencies
+    STANDARD_FREQUENCIES = {
+        "breast": "Every 2 years",
+        "colorectal": "Every 10 years",
+        "lung": "Annually",
+        "cervical": "Every 3 years",
+        "prostate": "Every 2 years",
+        "melanoma": "Annually",
+        "ovarian": "Consult physician",
+        "pancreatic": "Consult physician",
     }
 
     def parse_age_from_guideline(value) -> int | None:
@@ -1207,14 +1346,19 @@ async def generate_screening_recommendations(
         if isinstance(value, int):
             return value
         if isinstance(value, str):
-            # Handle "50 to 80" → take the lower bound
             import re
             nums = re.findall(r'\d+', value)
             if nums:
                 return int(nums[0])
         return None
 
-    for cancer_type, guidelines in uspstf_data.items():
+    # Get cancer-specific risks from AI analysis
+    cancer_specific_risks = risk_analysis.get("cancer_specific_risks", {})
+    
+    # Process ALL cancer types, not just those with family history
+    all_cancer_types = ["breast", "colorectal", "lung", "cervical", "prostate", "melanoma", "ovarian", "pancreatic"]
+    
+    for cancer_type in all_cancer_types:
         # Skip gender-inappropriate screenings
         if cancer_type == "breast" and patient_info.sex.lower() == "male":
             continue
@@ -1222,58 +1366,99 @@ async def generate_screening_recommendations(
             continue
         if cancer_type == "prostate" and patient_info.sex.lower() == "female":
             continue
+        if cancer_type == "ovarian" and patient_info.sex.lower() == "male":
+            continue
 
-        risk_level = RiskLevel(risk_analysis["risk_level"])
-        is_high_risk = risk_level in [RiskLevel.HIGH, RiskLevel.VERY_HIGH]
-        is_moderate = risk_level == RiskLevel.MODERATE
-
-        # Try to get age from TinyFish data first, then fall back to our constants
-        if is_high_risk:
-            tinyfish_age = parse_age_from_guideline(guidelines.get("high_risk_age"))
-            fallback_age = HIGH_RISK_AGES.get(cancer_type)
-            recommended_start_age = tinyfish_age or fallback_age or USPSTF_STANDARD_AGES.get(cancer_type) or 50
-        elif is_moderate:
-            tinyfish_age = parse_age_from_guideline(guidelines.get("standard_age"))
-            fallback_age = USPSTF_STANDARD_AGES.get(cancer_type)
-            # For moderate risk, start 5 years earlier than standard
-            base = tinyfish_age or fallback_age or 50
-            recommended_start_age = max(base - 5, 25)
+        # Get guidelines from TinyFish data or use defaults
+        guidelines = uspstf_data.get(cancer_type, {})
+        
+        # Determine risk level for THIS specific cancer type
+        cancer_risk_info = cancer_specific_risks.get(cancer_type, {})
+        cancer_risk_level_str = cancer_risk_info.get("risk_level", "low")
+        
+        # Map string to enum
+        risk_level_map = {
+            "low": RiskLevel.LOW,
+            "moderate": RiskLevel.MODERATE,
+            "high": RiskLevel.HIGH,
+            "very_high": RiskLevel.VERY_HIGH
+        }
+        cancer_risk_level = risk_level_map.get(cancer_risk_level_str, RiskLevel.LOW)
+        
+        # Get standard age for this cancer - prioritize TinyFish data
+        tinyfish_standard_age = parse_age_from_guideline(guidelines.get("standard_age"))
+        fallback_standard_age = USPSTF_STANDARD_AGES.get(cancer_type, 50)
+        
+        # Use TinyFish age if available, otherwise use our known USPSTF ages
+        standard_age = tinyfish_standard_age if tinyfish_standard_age else fallback_standard_age
+        
+        print(f"🎯 {cancer_type}: risk_level={cancer_risk_level_str}, TinyFish={tinyfish_standard_age}, Fallback={fallback_standard_age}, Using standard={standard_age}")
+        
+        # Calculate personalized start age based on risk
+        if cancer_risk_level in [RiskLevel.HIGH, RiskLevel.VERY_HIGH]:
+            # High risk: start 10 years earlier, minimum 25
+            calculated_age = standard_age - 10
+            recommended_start_age = max(calculated_age, 25)
+            print(f"   ✅ High risk: {standard_age} - 10 = {calculated_age}, max(25) → {recommended_start_age}")
+        elif cancer_risk_level == RiskLevel.MODERATE:
+            # Moderate risk: start 5 years earlier
+            calculated_age = standard_age - 5
+            recommended_start_age = max(calculated_age, 25)
+            print(f"   ⚠️ Moderate risk: {standard_age} - 5 = {calculated_age}, max(25) → {recommended_start_age}")
         else:
-            # Low risk — use standard USPSTF age
-            tinyfish_age = parse_age_from_guideline(guidelines.get("standard_age"))
-            recommended_start_age = tinyfish_age or USPSTF_STANDARD_AGES.get(cancer_type) or 50
+            # Low risk: use standard USPSTF age
+            recommended_start_age = standard_age
+            print(f"   ℹ️ Low risk: using standard age {recommended_start_age}")
 
-        # Further adjust based on family history: if a first-degree relative was diagnosed
-        # young, recommend starting 10 years before their diagnosis age
-        family_members = risk_analysis.get("family_members_analyzed", [])
-        for member in family_members:
-            if (member.get("cancer_type") == cancer_type and
-                member.get("relationship") in ["parent", "sibling"] and
-                member.get("age_at_diagnosis")):
-                early_age = max(member["age_at_diagnosis"] - 10, 25)
-                recommended_start_age = min(recommended_start_age, early_age)
+        # Get screening method and frequency
+        method = guidelines.get("method") or STANDARD_METHODS.get(cancer_type, "Standard screening")
+        frequency = guidelines.get("frequency") or STANDARD_FREQUENCIES.get(cancer_type, "Consult physician")
 
-        # Cap at reasonable bounds
-        recommended_start_age = max(recommended_start_age, 18)
-
-        # Build rationale and frequency
+        # Build rationale - construct it ourselves to ensure accuracy
+        if cancer_risk_level in [RiskLevel.HIGH, RiskLevel.VERY_HIGH]:
+            risk_description = "high" if cancer_risk_level == RiskLevel.HIGH else "very high"
+            # Get the AI's explanation but rebuild the age comparison
+            ai_explanation = cancer_risk_info.get("rationale", "")
+            
+            # Build accurate rationale
+            if ai_explanation and "family history" in ai_explanation.lower():
+                # Extract just the family history part, not the age comparison
+                rationale = ai_explanation.split(".")[0] + "."
+            else:
+                rationale = f"{risk_description.title()} risk based on family history."
+            
+            # Add accurate age comparison
+            if recommended_start_age < standard_age:
+                rationale += f" Personalized screening recommended at age {recommended_start_age} (USPSTF standard is {standard_age})."
+            else:
+                rationale += f" Screening recommended at age {recommended_start_age}."
+                
+        elif cancer_risk_level == RiskLevel.MODERATE:
+            ai_explanation = cancer_risk_info.get("rationale", "")
+            if ai_explanation and "family history" in ai_explanation.lower():
+                rationale = ai_explanation.split(".")[0] + "."
+            else:
+                rationale = "Moderate risk based on family history."
+            
+            if recommended_start_age < standard_age:
+                rationale += f" Screening recommended at age {recommended_start_age} (USPSTF standard is {standard_age})."
+            else:
+                rationale += f" Screening recommended at age {recommended_start_age}."
+        else:
+            rationale = f"No family history of {cancer_type} cancer. Follow standard USPSTF screening starting at age {standard_age}."
+        
+        # Add age-specific guidance
         if patient_info.age < 18:
-            rationale = f"Due to significant family history, genetic counseling is recommended now. Screening will begin at age {recommended_start_age}."
-            frequency = f"Genetic counseling now, then begin screening at age {recommended_start_age}"
-            method = "Genetic counseling consultation + future screening planning"
+            rationale += f" Genetic counseling recommended now. Screening will begin at age {recommended_start_age}."
         elif patient_info.age < recommended_start_age:
             years_until = recommended_start_age - patient_info.age
-            rationale = f"Based on {risk_analysis['risk_level'].replace('_', ' ')} risk from family history. Begin screening in {years_until} year{'s' if years_until != 1 else ''} at age {recommended_start_age}."
-            frequency = f"Begin {guidelines.get('frequency', 'regular screening')} at age {recommended_start_age}"
-            method = guidelines.get("method") or "Standard screening — consult your physician"
+            rationale += f" You are {patient_info.age}, so screening begins in {years_until} year{'s' if years_until != 1 else ''}."
         else:
-            rationale = f"Based on {risk_analysis['risk_level'].replace('_', ' ')} risk from family history analysis. Screening should begin now."
-            frequency = guidelines.get("frequency") or "Consult physician for schedule"
-            method = guidelines.get("method") or "Standard screening"
+            rationale += f" You are at or above screening age — discuss with your doctor."
 
         recommendation = ScreeningRecommendation(
             cancer_type=CancerType(cancer_type),
-            risk_level=risk_level,
+            risk_level=cancer_risk_level,
             recommended_age_start=recommended_start_age,
             screening_frequency=frequency,
             screening_method=method,

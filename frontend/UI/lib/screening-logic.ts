@@ -49,7 +49,7 @@ export interface ScreeningRecommendation {
 }
 
 // USPSTF STANDARD GUIDELINES
-const STANDARD_GUIDELINES: Record<CancerType, { startAge: number; frequency: string; method: string }> = {
+export const STANDARD_GUIDELINES: Record<CancerType, { startAge: number; frequency: string; method: string }> = {
   breast: { startAge: 40, frequency: "Every 2 years", method: "Mammography" },
   colorectal: { startAge: 45, frequency: "Every 10 years", method: "Colonoscopy" },
   cervical: { startAge: 21, frequency: "Every 3 years", method: "Pap smear" },

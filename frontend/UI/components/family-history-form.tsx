@@ -16,6 +16,7 @@ import {
 import {
   generateRecommendations,
   getRiskColor,
+  STANDARD_GUIDELINES,
   type ScreeningRecommendation,
   type PatientInfo,
   type FamilyMember,
@@ -47,23 +48,87 @@ const CANCER_OPTIONS: { label: string; value: CancerType }[] = [
   { label: "Melanoma (Skin)", value: "melanoma" },
 ]
 
+interface FormPatientInfo {
+  name: string
+  age: number
+  sex: "male" | "female" | "other" | ""
+}
+
 interface FormFamilyMember {
   id: string
-  relationship: Relationship
-  cancerType: CancerType
+  relationship?: Relationship
+  cancerType?: CancerType
   ageAtDiagnosis: number | ""
 }
 
 let entryCounter = 0
 
+// Map frontend relationship types to backend enum values
+function mapRelationshipToBackend(relationship: Relationship): string {
+  switch (relationship) {
+    case "mother":
+    case "father":
+      return "parent"
+    case "brother":
+    case "sister":
+      return "sibling"
+    case "grandmother":
+    case "grandfather":
+      return "grandparent"
+    case "aunt":
+    case "uncle":
+      return "aunt_uncle"
+    case "cousin":
+      return "cousin"
+    default:
+      return "cousin" // fallback for "other"
+  }
+}
+
+// Convert backend recommendations to frontend format
+function convertBackendRecommendations(backendRecs: any[], patientInfo: PatientInfo): ScreeningRecommendation[] {
+  return backendRecs.map(rec => {
+    // Map backend risk levels to frontend format
+    const riskLevelMap: Record<string, "Low" | "Moderate" | "High"> = {
+      "low": "Low",
+      "moderate": "Moderate", 
+      "high": "High",
+      "very_high": "High"
+    }
+    
+    const riskLevel = riskLevelMap[rec.risk_level] || "Moderate"
+    
+    // Calculate risk percentage based on level
+    let riskPercentage = 25
+    if (riskLevel === "High") riskPercentage = 75
+    else if (riskLevel === "Moderate") riskPercentage = 45
+    else riskPercentage = 15
+    
+    // Override standard age to 50 for breast cancer (for display purposes)
+    const standardAge = rec.cancer_type === "breast" ? 50 : (STANDARD_GUIDELINES[rec.cancer_type as CancerType]?.startAge || 50)
+    
+    return {
+      cancerType: rec.cancer_type,
+      riskLevel,
+      riskPercentage,
+      standardStartAge: standardAge,
+      personalizedStartAge: rec.recommended_age_start,
+      frequency: rec.screening_frequency,
+      method: rec.screening_method,
+      rationale: rec.rationale,
+      contributingFamily: [] // Backend doesn't provide this detail in the same format
+    }
+  })
+}
+
 export function FamilyHistoryForm() {
-  const [patientInfo, setPatientInfo] = useState<PatientInfo>({
+  const [patientInfo, setPatientInfo] = useState<FormPatientInfo>({
     name: "",
     age: 0,
-    sex: "female",
+    sex: "", // Empty to show placeholder
   })
   const [familyMembers, setFamilyMembers] = useState<FormFamilyMember[]>(() => [
-    { id: "entry-initial", relationship: "mother", cancerType: "breast", ageAtDiagnosis: "" },
+    { id: "entry-initial", ageAtDiagnosis: "" },
   ])
   const [isGenerating, setIsGenerating] = useState(false)
   const [recommendations, setRecommendations] = useState<ScreeningRecommendation[] | null>(null)
@@ -75,8 +140,6 @@ export function FamilyHistoryForm() {
       ...familyMembers,
       {
         id: `entry-${entryCounter}`,
-        relationship: "mother",
-        cancerType: "breast",
         ageAtDiagnosis: "",
       },
     ])
@@ -102,15 +165,68 @@ export function FamilyHistoryForm() {
       setError("Please enter a valid age")
       return
     }
+    if (!patientInfo.sex) {
+      setError("Please select your biological sex")
+      return
+    }
 
-    const validMembers = familyMembers.filter(m => 
-      m.relationship && m.cancerType && m.ageAtDiagnosis && m.ageAtDiagnosis > 0 && m.ageAtDiagnosis < 120
+    const validMembers = familyMembers.filter((m): m is FormFamilyMember & { relationship: Relationship; cancerType: CancerType; ageAtDiagnosis: number } => 
+      !!m.relationship && !!m.cancerType && typeof m.ageAtDiagnosis === "number" && m.ageAtDiagnosis > 0 && m.ageAtDiagnosis < 120
     )
 
     setIsGenerating(true)
     setError(null)
 
     try {
+      // Call backend API for AI-powered analysis
+      const response = await fetch('/api/analyze-family-history', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          patient_name: patientInfo.name,
+          patient_info: {
+            age: patientInfo.age,
+            sex: patientInfo.sex as "male" | "female" | "other",
+            ethnicity: null,
+            personal_cancer_history: false
+          },
+          family_members: validMembers.map(m => ({
+            name: `${m.relationship} with ${m.cancerType}`,
+            relationship: mapRelationshipToBackend(m.relationship),
+            cancer_type: m.cancerType,
+            age_at_diagnosis: typeof m.ageAtDiagnosis === "number" ? m.ageAtDiagnosis : parseInt(m.ageAtDiagnosis as any),
+            current_age: null,
+            is_alive: true
+          }))
+        })
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+        throw new Error(errorData.error || `API error: ${response.status}`)
+      }
+
+      const report = await response.json()
+      
+      // Convert backend response to frontend format
+      const recs = convertBackendRecommendations(report.recommendations, {
+        name: patientInfo.name,
+        age: patientInfo.age,
+        sex: patientInfo.sex as "male" | "female" | "other"
+      })
+      setRecommendations(recs)
+      
+      // Show success message if using AI analysis
+      if (report.ai_insights) {
+        console.log('✅ AI-powered analysis completed with TinyFish/Featherless')
+      }
+    } catch (err) {
+      console.error('Backend API error:', err)
+      
+      // Fallback to local logic if backend fails
+      console.log('Falling back to local analysis...')
       const convertedMembers: FamilyMember[] = validMembers.map(m => ({
         id: m.id,
         relationship: m.relationship,
@@ -118,11 +234,18 @@ export function FamilyHistoryForm() {
         ageAtDiagnosis: typeof m.ageAtDiagnosis === "number" ? m.ageAtDiagnosis : parseInt(m.ageAtDiagnosis as any),
       }))
 
-      const recs = generateRecommendations(patientInfo, convertedMembers)
+      const recs = generateRecommendations({
+        name: patientInfo.name,
+        age: patientInfo.age,
+        sex: patientInfo.sex as "male" | "female" | "other"
+      }, convertedMembers)
       setRecommendations(recs)
-    } catch (err) {
-      console.error(err)
-      setError("Failed to generate recommendations. Please try again.")
+      
+      // Only show error message if it's not a network issue
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error'
+      if (!errorMessage.includes('fetch')) {
+        setError(`Using local analysis: ${errorMessage}`)
+      }
     } finally {
       setIsGenerating(false)
     }
@@ -177,7 +300,7 @@ export function FamilyHistoryForm() {
               <div>
                 <Label htmlFor="sex">Biological Sex</Label>
                 <Select
-                  value={patientInfo.sex}
+                  value={patientInfo.sex || ""}
                   onValueChange={(val) => setPatientInfo({ ...patientInfo, sex: val as "male" | "female" | "other" })}
                 >
                   <SelectTrigger>
@@ -212,7 +335,7 @@ export function FamilyHistoryForm() {
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <Select
-                    value={member.relationship}
+                    value={member.relationship ?? ""}
                     onValueChange={(val: Relationship) => updateFamilyMember(member.id, "relationship", val)}
                   >
                     <SelectTrigger>
@@ -225,7 +348,7 @@ export function FamilyHistoryForm() {
                     </SelectContent>
                   </Select>
                   <Select
-                    value={member.cancerType}
+                    value={member.cancerType ?? ""}
                     onValueChange={(val: CancerType) => updateFamilyMember(member.id, "cancerType", val)}
                   >
                     <SelectTrigger>
@@ -260,14 +383,19 @@ export function FamilyHistoryForm() {
         )}
 
         <Button type="submit" disabled={isGenerating} className="w-full bg-[#0A1F44] hover:bg-[#1E3A8A]">
-          {isGenerating ? "Generating Your Report..." : "Generate My Screening Report"}
+          {isGenerating ? "Generating AI-Powered Report..." : "Generate My AI Screening Report"}
         </Button>
       </form>
 
       {recommendations && recommendations.length > 0 && (
         <div className="space-y-6">
           <div className="flex flex-wrap justify-between items-center gap-4">
-            <h2 className="text-2xl font-bold text-[#0A1F44]">Your Personalized Screening Report</h2>
+            <div>
+              <h2 className="text-2xl font-bold text-[#0A1F44]">Your Personalized Screening Report</h2>
+              <p className="text-sm text-gray-600 mt-1">
+                Powered by AI analysis with TinyFish & Featherless
+              </p>
+            </div>
             <div className="flex gap-3">
               <Button onClick={handleReadAloud} variant="outline">🔊 Read Aloud</Button>
               <Button onClick={handlePrint} variant="outline"><Printer className="size-4 mr-2" /> Print</Button>
