@@ -382,6 +382,22 @@ export function FamilyHistoryForm() {
           </div>
         )}
 
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <div className="flex items-start gap-3">
+            <div className="flex-shrink-0 mt-0.5">
+              <svg className="size-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <div className="flex-1">
+              <p className="text-sm text-blue-800 font-medium mb-1">Data Usage & Privacy Notice</p>
+              <p className="text-xs text-blue-700 leading-relaxed">
+                By using this service, you agree that your family health history will be processed by AI systems (Featherless AI and TinyFish) to generate personalized screening recommendations. Your data is used solely for analysis and is not stored on our servers. This service is for informational purposes only and does not replace professional medical advice.
+              </p>
+            </div>
+          </div>
+        </div>
+
         <Button type="submit" disabled={isGenerating} className="w-full bg-[#0A1F44] hover:bg-[#1E3A8A]">
           {isGenerating ? "Generating AI-Powered Report..." : "Generate My AI Screening Report"}
         </Button>
@@ -457,8 +473,13 @@ export function FamilyHistoryForm() {
             })}
           </div>
 
-          <div className="text-center text-xs text-gray-400 pt-4">
-            This report is for informational purposes only and is not a substitute for professional medical advice.
+          <div className="text-center text-xs text-gray-500 pt-4 space-y-2">
+            <p className="font-medium">Medical & Privacy Disclaimer</p>
+            <p className="text-gray-400">
+              This report is for informational purposes only and is not a substitute for professional medical advice. 
+              By using this service, you acknowledge that your health information has been processed by AI systems for analysis. 
+              No data is stored on our servers. Always consult with your healthcare provider for personalized medical recommendations.
+            </p>
           </div>
         </div>
       )}
