@@ -684,6 +684,102 @@ async def tinyfish_get_guidelines(family_history: FamilyHistoryInput) -> dict:
         return await mock_uspstf_guidelines(family_history)
     
     async with httpx.AsyncClient() as client:
+        # Get cancer types that have family history + always include breast/colorectal
+        cancer_types_with_history = set()
+        for member in family_history.family_members:
+            cancer_types_with_history.add(member.cancer_type)
+        
+        # Always include these common screenings
+        cancer_types_with_history.add(CancerType.BREAST)
+        cancer_types_with_history.add(CancerType.COLORECTAL)
+        
+        # Add gender-appropriate screenings
+        if family_history.patient_info.sex.lower() == "female":
+            cancer_types_with_history.add(CancerType.CERVICAL)
+        if family_history.patient_info.sex.lower() == "male":
+            cancer_types_with_history.add(CancerType.PROSTATE)
+        
+        print(f"🔍 TinyFish fetching guidelines for: {[ct.value for ct in cancer_types_with_history]}")
+        
+        # USPSTF URLs for different cancer screening guidelines
+        cancer_url_map = {
+            "breast": "https://www.uspreventiveservicestaskforce.org/uspstf/recommendation/breast-cancer-screening",
+            "colorectal": "https://www.uspreventiveservicestaskforce.org/uspstf/recommendation/colorectal-cancer-screening",
+            "lung": "https://www.uspreventiveservicestaskforce.org/uspstf/recommendation/lung-cancer-screening",
+            "prostate": "https://www.uspreventiveservicestaskforce.org/uspstf/recommendation/prostate-cancer-screening",
+            "cervical": "https://www.uspreventiveservicestaskforce.org/uspstf/recommendation/cervical-cancer-screening",
+            "melanoma": "https://www.uspreventiveservicestaskforce.org/uspstf/recommendation/skin-cancer-screening"
+        }
+        
+        # Build list of URLs to fetch
+        uspstf_urls = []
+        for cancer_type in cancer_types_with_history:
+            if cancer_type.value in cancer_url_map:
+                uspstf_urls.append(cancer_url_map[cancer_type.value])
+        
+        # Limit to max 4 URLs to avoid timeout
+        uspstf_urls = uspstf_urls[:4]
+        
+        print(f"🌐 TinyFish fetching {len(uspstf_urls)} URLs: {uspstf_urls}")
+        
+        try:
+            # Use TinyFish Fetch API to get USPSTF content
+            fetch_request = {
+                "urls": uspstf_urls,
+                "format": "markdown"
+            }
+            
+            print(f"📤 TinyFish request payload: {fetch_request}")
+            print(f"📤 TinyFish API endpoint: {TINYFISH_BASE_URL}")
+            
+            response = await client.post(
+                TINYFISH_BASE_URL,
+                headers={
+                    "X-API-Key": TINYFISH_API_KEY,
+                    "Content-Type": "application/json"
+                },
+                json=fetch_request,
+                timeout=30.0  # Reduced timeout - 30 seconds max
+            )
+            
+            print(f"📥 TinyFish response status: {response.status_code}")
+            
+            if response.status_code != 200:
+                error_text = response.text
+                print(f"❌ TinyFish API error response: {error_text}")
+                return await mock_uspstf_guidelines(family_history)
+            
+            result = response.json()
+            print(f"✅ TinyFish API response received")
+            
+            # Parse the fetched USPSTF content
+            if "results" in result and result["results"]:
+                print(f"📄 TinyFish returned {len(result['results'])} results")
+                parsed_guidelines = parse_uspstf_content(result["results"], list(cancer_types_with_history))
+                
+                # Fill in missing cancer types with defaults
+                all_cancer_types = [
+                    CancerType.BREAST, CancerType.COLORECTAL, CancerType.LUNG,
+                    CancerType.CERVICAL, CancerType.PROSTATE, CancerType.MELANOMA,
+                    CancerType.OVARIAN, CancerType.PANCREATIC
+                ]
+                for cancer_type in all_cancer_types:
+                    if cancer_type.value not in parsed_guidelines:
+                        parsed_guidelines[cancer_type.value] = get_default_guideline(cancer_type.value)
+                
+                return parsed_guidelines
+            else:
+                print(f"⚠️ TinyFish returned no results")
+                return await mock_uspstf_guidelines(family_history)
+                
+        except httpx.TimeoutException as e:
+            print(f"❌ TinyFish timeout after 30s - falling back to mock data")
+            return await mock_uspstf_guidelines(family_history)
+        except Exception as e:
+            print(f"❌ TinyFish API error: {type(e).__name__}: {e}")
+            return await mock_uspstf_guidelines(family_history)
+    
+    async with httpx.AsyncClient() as client:
         # Get ALL major cancer types for comprehensive screening recommendations
         # Not just those with family history
         all_cancer_types = [
@@ -1239,8 +1335,8 @@ async def mock_uspstf_guidelines(family_history: FamilyHistoryInput) -> dict:
     """Mock USPSTF guidelines for development/testing."""
     return {
         "breast": {
-            "standard_age": 50,
-            "high_risk_age": 40,
+            "standard_age": 40,  # USPSTF actual age (displayed as 50 in UI)
+            "high_risk_age": 30,
             "frequency": "Every 2 years",
             "method": "Mammography"
         },
@@ -1249,6 +1345,42 @@ async def mock_uspstf_guidelines(family_history: FamilyHistoryInput) -> dict:
             "high_risk_age": 40,
             "frequency": "Every 10 years",
             "method": "Colonoscopy"
+        },
+        "lung": {
+            "standard_age": 50,
+            "high_risk_age": 45,
+            "frequency": "Annually",
+            "method": "Low-dose CT scan"
+        },
+        "cervical": {
+            "standard_age": 21,
+            "high_risk_age": 21,
+            "frequency": "Every 3 years",
+            "method": "Pap smear"
+        },
+        "prostate": {
+            "standard_age": 50,
+            "high_risk_age": 45,
+            "frequency": "Every 2 years",
+            "method": "PSA test"
+        },
+        "melanoma": {
+            "standard_age": 35,
+            "high_risk_age": 25,
+            "frequency": "Annually",
+            "method": "Skin exam"
+        },
+        "ovarian": {
+            "standard_age": 50,
+            "high_risk_age": 30,
+            "frequency": "Consult physician",
+            "method": "Consult physician"
+        },
+        "pancreatic": {
+            "standard_age": 50,
+            "high_risk_age": 40,
+            "frequency": "Consult physician",
+            "method": "Consult physician"
         }
     }
 
