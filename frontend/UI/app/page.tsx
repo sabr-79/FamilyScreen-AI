@@ -1,14 +1,40 @@
 "use client"
 
+import { useState, useEffect } from "react"
 import { ShieldCheck, ArrowRight, FileText, Sparkles, Users } from "lucide-react"
 import { FamilyHistoryForm } from "@/components/family-history-form"
 import { HealthAssistant } from "@/components/health-assistant"
 import { UpgradeButton } from "@/components/upgrade-button"
 import { SponsorsSection } from "@/components/sponsors-section"
-import { VoiceGuidedFormExample } from "@/components/voice-guided-form-example"
+import { DoctorRehearsal } from "@/components/doctor-rehearsal"
 
 export default function FamilyScreenAI() {
   const isPremium = false
+  const [activeSection, setActiveSection] = useState("top")
+
+  const scrollTo = (id: string) => {
+    setActiveSection(id)
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" })
+  }
+
+  useEffect(() => {
+    const sections = ["top", "how-it-works", "assessment"]
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            setActiveSection(entry.target.id)
+          }
+        })
+      },
+      { rootMargin: "-40% 0px -55% 0px" }
+    )
+    sections.forEach((id) => {
+      const el = document.getElementById(id)
+      if (el) observer.observe(el)
+    })
+    return () => observer.disconnect()
+  }, [])
 
   return (
     <main className="min-h-screen bg-white" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
@@ -25,7 +51,7 @@ export default function FamilyScreenAI() {
         top: 0,
         zIndex: 50,
       }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }} onClick={() => scrollTo("top")}>
           <div style={{
             width: 32, height: 32, background: "#0A1F44", borderRadius: 7,
             display: "flex", alignItems: "center", justifyContent: "center",
@@ -40,14 +66,38 @@ export default function FamilyScreenAI() {
           </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 24, fontSize: 14 }}>
-          <span style={{ color: "#0A1F44", fontWeight: 600 }}>Home</span>
-          <a href="#assessment" style={{ color: "#64748b", textDecoration: "none" }}>Assessment</a>
-          <a href="#how-it-works" style={{ color: "#64748b", textDecoration: "none" }}>How it works</a>
+          {[
+            { id: "top", label: "Home" },
+            { id: "assessment", label: "Assessment" },
+            { id: "how-it-works", label: "How it works" },
+          ].map((item) => {
+            const isActive = activeSection === item.id
+            return (
+              <button
+                key={item.id}
+                onClick={() => scrollTo(item.id)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: isActive ? "#0A1F44" : "#64748b",
+                  fontWeight: isActive ? 600 : 400,
+                  cursor: "pointer",
+                  fontSize: 14,
+                  transition: "color 0.2s ease, font-weight 0.2s ease",
+                  padding: 0,
+                }}
+              >
+                {item.label}
+              </button>
+            )
+          })}
           {!isPremium && (
             <UpgradeButton />
           )}
         </div>
       </header>
+
+      <div id="top" />
 
       {/* ── HERO ── */}
       <section style={{
@@ -57,7 +107,6 @@ export default function FamilyScreenAI() {
         position: "relative",
         overflow: "hidden",
       }}>
-        {/* Grid overlay */}
         <div style={{
           position: "absolute", inset: 0,
           backgroundImage: "linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px)",
@@ -65,7 +114,6 @@ export default function FamilyScreenAI() {
           WebkitMaskImage: "radial-gradient(ellipse at center, black 30%, transparent 85%)",
           maskImage: "radial-gradient(ellipse at center, black 30%, transparent 85%)",
         }} />
-        {/* Glow */}
         <div style={{
           position: "absolute", top: -120, right: -60,
           width: 520, height: 520,
@@ -82,7 +130,6 @@ export default function FamilyScreenAI() {
           maxWidth: 1100,
           margin: "0 auto",
         }}>
-          {/* Left */}
           <div>
             <div style={{
               display: "inline-flex", alignItems: "center", gap: 8,
@@ -110,31 +157,30 @@ export default function FamilyScreenAI() {
             </p>
 
             <div style={{ marginTop: 36, display: "flex", gap: 12, flexWrap: "wrap" }}>
-              <a href="#assessment" style={{
+              <button onClick={() => scrollTo("assessment")} style={{
                 background: "#2563EB", color: "white",
                 border: 0, padding: "14px 28px", borderRadius: 10,
                 fontSize: 16, fontWeight: 600,
                 display: "inline-flex", alignItems: "center", gap: 10,
                 boxShadow: "0 6px 24px -4px rgba(37,99,235,0.6)",
-                textDecoration: "none",
+                cursor: "pointer",
               }}>
                 Get Started
                 <ArrowRight size={18} />
-              </a>
-              <a href="#how-it-works" style={{
+              </button>
+              <button onClick={() => scrollTo("how-it-works")} style={{
                 background: "transparent", color: "white",
                 border: "0.5px solid rgba(255,255,255,0.25)",
                 padding: "14px 22px", borderRadius: 10,
                 fontSize: 15, fontWeight: 500,
                 display: "inline-flex", alignItems: "center", gap: 8,
-                textDecoration: "none",
+                cursor: "pointer",
               }}>
                 <FileText size={16} />
                 How it works
-              </a>
+              </button>
             </div>
 
-            {/* Real stats only */}
             <div style={{ marginTop: 56, display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 32, maxWidth: 480 }}>
               <div>
                 <div style={{ fontFamily: "'Georgia', serif", fontSize: 30, fontWeight: 600 }}>9</div>
@@ -151,7 +197,6 @@ export default function FamilyScreenAI() {
             </div>
           </div>
 
-          {/* Right — floating mock report card */}
           <div style={{
             background: "white", padding: 24, borderRadius: 16,
             color: "#0f172a", transform: "rotate(1.2deg)",
@@ -191,7 +236,7 @@ export default function FamilyScreenAI() {
       </section>
 
       {/* ── HOW IT WORKS ── */}
-      <section id="how-it-works" style={{ background: "#f8fafc", padding: "72px 48px" }}>
+      <section id="how-it-works" style={{ background: "#f8fafc", padding: "72px 48px", scrollMarginTop: 80 }}>
         <div style={{ maxWidth: 1100, margin: "0 auto" }}>
           <div style={{ textAlign: "center", maxWidth: 560, margin: "0 auto" }}>
             <div style={{ fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.14em", color: "#2563EB" }}>How it works</div>
@@ -245,25 +290,8 @@ export default function FamilyScreenAI() {
         </div>
       </section>
 
-      {/* ── VOICE TEST SECTION (DEMO) ── */}
-      <section style={{ background: "white", padding: "56px 48px" }}>
-        <div style={{ maxWidth: 780, margin: "0 auto" }}>
-          <div style={{ textAlign: "center", marginBottom: 36 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.14em", color: "#2563EB" }}>🎙️ Voice Demo</div>
-            <h2 style={{ fontFamily: "'Georgia', serif", fontSize: 42, fontWeight: 600, color: "#0A1F44", margin: "12px 0 16px", letterSpacing: "-0.02em" }}>
-              Try Voice-Guided Input
-            </h2>
-            <p style={{ color: "#64748b", fontSize: 15, margin: 0 }}>
-              AI reads questions out loud. You can respond by voice or typing.
-            </p>
-          </div>
-
-          <VoiceGuidedFormExample />
-        </div>
-      </section>
-
       {/* ── ASSESSMENT SECTION ── */}
-      <section id="assessment" style={{ background: "#f8fafc", padding: "56px 48px 72px" }}>
+      <section id="assessment" style={{ background: "#f8fafc", padding: "56px 48px 72px", scrollMarginTop: 80 }}>
         <div style={{ maxWidth: 780, margin: "0 auto" }}>
           <div style={{ textAlign: "center", marginBottom: 36 }}>
             <div style={{ fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.14em", color: "#2563EB" }}>Assessment</div>
@@ -273,7 +301,6 @@ export default function FamilyScreenAI() {
             <p style={{ color: "#64748b", fontSize: 15, margin: 0 }}>Your family&apos;s health history helps identify screening needs.</p>
           </div>
 
-          {/* HIPAA banner */}
           <div style={{
             display: "flex", alignItems: "flex-start", gap: 12,
             border: "0.5px solid rgba(37,99,235,0.2)", background: "#EFF6FF",
@@ -294,6 +321,22 @@ export default function FamilyScreenAI() {
       <section style={{ background: "white", padding: "56px 48px" }}>
         <div style={{ maxWidth: 780, margin: "0 auto" }}>
           <HealthAssistant isPremium={isPremium} onUpgrade={() => {}} />
+        </div>
+      </section>
+
+      {/* ── DR. CHEN REHEARSAL ── */}
+      <section style={{ background: "#f8fafc", padding: "56px 48px" }}>
+        <div style={{ maxWidth: 780, margin: "0 auto" }}>
+          <div style={{ textAlign: "center", marginBottom: 32 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.14em", color: "#2563EB" }}>Powered by ElevenLabs</div>
+            <h2 style={{ fontFamily: "'Georgia', serif", fontSize: 42, fontWeight: 600, color: "#0A1F44", margin: "12px 0 12px", letterSpacing: "-0.02em" }}>
+              Rehearse your doctor visit
+            </h2>
+            <p style={{ color: "#64748b", fontSize: 15, margin: 0, maxWidth: 520, marginLeft: "auto", marginRight: "auto" }}>
+              Knowing your risk is just the start. Practice the conversation with an AI doctor so you walk into your real appointment prepared.
+            </p>
+          </div>
+          <DoctorRehearsal />
         </div>
       </section>
 

@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useId } from "react"
-import { Plus, Trash2, Loader2, AlertCircle } from "lucide-react"
+import { useState } from "react"
+import { Plus, Trash2, Printer } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -13,590 +13,327 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  generateRecommendations,
+  getRiskColor,
+  type ScreeningRecommendation,
+  type PatientInfo,
+  type FamilyMember,
+  type CancerType,
+  type Relationship,
+} from "@/lib/screening-logic"
 
-// Backend enum mappings
-const RELATIONSHIPS = [
-  { label: "Mother", value: "parent" },
-  { label: "Father", value: "parent" },
-  { label: "Sister", value: "sibling" },
-  { label: "Brother", value: "sibling" },
-  { label: "Grandmother", value: "grandparent" },
-  { label: "Grandfather", value: "grandparent" },
-  { label: "Aunt", value: "aunt_uncle" },
-  { label: "Uncle", value: "aunt_uncle" },
+const RELATIONSHIP_OPTIONS: { label: string; value: Relationship }[] = [
+  { label: "Mother", value: "mother" },
+  { label: "Father", value: "father" },
+  { label: "Brother", value: "brother" },
+  { label: "Sister", value: "sister" },
+  { label: "Grandmother", value: "grandmother" },
+  { label: "Grandfather", value: "grandfather" },
+  { label: "Aunt", value: "aunt" },
+  { label: "Uncle", value: "uncle" },
   { label: "Cousin", value: "cousin" },
-] as const
+  { label: "Other", value: "other" },
+]
 
-const CANCER_TYPES = [
+const CANCER_OPTIONS: { label: string; value: CancerType }[] = [
   { label: "Breast", value: "breast" },
-  { label: "Colon", value: "colorectal" },
+  { label: "Colorectal (Colon)", value: "colorectal" },
+  { label: "Cervical", value: "cervical" },
   { label: "Lung", value: "lung" },
   { label: "Prostate", value: "prostate" },
-  { label: "Cervical", value: "cervical" },
-  { label: "Skin (Melanoma)", value: "melanoma" },
   { label: "Ovarian", value: "ovarian" },
   { label: "Pancreatic", value: "pancreatic" },
-  { label: "Other", value: "other" },
-] as const
+  { label: "Melanoma (Skin)", value: "melanoma" },
+]
 
-interface FamilyMemberEntry {
+interface FormFamilyMember {
   id: string
-  name: string
-  relationship: string
-  relationshipLabel: string
-  cancerType: string
-  ageAtDiagnosis: string
+  relationship: Relationship
+  cancerType: CancerType
+  ageAtDiagnosis: number | ""
 }
-
-interface PatientInfo {
-  name: string
-  age: string
-  sex: string
-}
-
-interface ScreeningRecommendation {
-  cancer_type: string
-  risk_level: string
-  recommended_age_start: number
-  screening_frequency: string
-  screening_method: string
-  rationale: string
-}
-
-interface RiskReport {
-  patient_name: string
-  generated_date: string
-  overall_risk_summary: string
-  recommendations: ScreeningRecommendation[]
-  next_steps: string[]
-  disclaimer: string
-}
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
 let entryCounter = 0
-function generateEntryId() {
-  return `entry-${++entryCounter}`
-}
-
 
 export function FamilyHistoryForm() {
-    const formId = useId()
-
   const [patientInfo, setPatientInfo] = useState<PatientInfo>({
     name: "",
-    age: "",
-    sex: "",
+    age: 0,
+    sex: "female",
   })
-  const [entries, setEntries] = useState<FamilyMemberEntry[]>(() => [
-    { id: "entry-initial", name: "", relationship: "", relationshipLabel: "", cancerType: "", ageAtDiagnosis: "" },
+  const [familyMembers, setFamilyMembers] = useState<FormFamilyMember[]>(() => [
+    { id: "entry-initial", relationship: "mother", cancerType: "breast", ageAtDiagnosis: "" },
   ])
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [report, setReport] = useState<RiskReport | null>(null)
-  const [submittedPatient, setSubmittedPatient] = useState<PatientInfo | null>(null)
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [recommendations, setRecommendations] = useState<ScreeningRecommendation[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const addEntry = () => {
-    setEntries([
-      ...entries,
-      { id: generateEntryId(), name: "", relationship: "", relationshipLabel: "", cancerType: "", ageAtDiagnosis: "" },
+  const addFamilyMember = () => {
+    entryCounter++
+    setFamilyMembers([
+      ...familyMembers,
+      {
+        id: `entry-${entryCounter}`,
+        relationship: "mother",
+        cancerType: "breast",
+        ageAtDiagnosis: "",
+      },
     ])
   }
 
-  const removeEntry = (id: string) => {
-    if (entries.length > 1) {
-      setEntries(entries.filter((entry) => entry.id !== id))
-    }
+  const removeFamilyMember = (id: string) => {
+    if (familyMembers.length === 1) return
+    setFamilyMembers(familyMembers.filter(m => m.id !== id))
   }
 
-  const updateEntry = (id: string, field: keyof FamilyMemberEntry, value: string) => {
-    setEntries(
-      entries.map((entry) =>
-        entry.id === id ? { ...entry, [field]: value } : entry
-      )
-    )
-  }
-
-  const updateRelationship = (id: string, label: string) => {
-    const rel = RELATIONSHIPS.find((r) => r.label === label)
-    if (rel) {
-      setEntries(
-        entries.map((entry) =>
-          entry.id === id
-            ? { ...entry, relationship: rel.value, relationshipLabel: rel.label, name: rel.label }
-            : entry
-        )
-      )
-    }
+  const updateFamilyMember = (id: string, field: keyof FormFamilyMember, value: any) => {
+    setFamilyMembers(familyMembers.map(m => m.id === id ? { ...m, [field]: value } : m))
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setError(null)
-    setIsSubmitting(true)
-
-    // Validate required fields
-    if (!patientInfo.name || !patientInfo.age || !patientInfo.sex) {
-      setError("Please fill in all patient information fields.")
-      setIsSubmitting(false)
+    
+    if (!patientInfo.name.trim()) {
+      setError("Please enter your name")
+      return
+    }
+    if (patientInfo.age <= 0 || patientInfo.age > 120) {
+      setError("Please enter a valid age")
       return
     }
 
-    const validEntries = entries.filter(
-      (entry) => entry.relationship && entry.cancerType && entry.ageAtDiagnosis
+    const validMembers = familyMembers.filter(m => 
+      m.relationship && m.cancerType && m.ageAtDiagnosis && m.ageAtDiagnosis > 0 && m.ageAtDiagnosis < 120
     )
 
-    if (validEntries.length === 0) {
-      setError("Please add at least one complete family member entry.")
-      setIsSubmitting(false)
-      return
-    }
-
-    // Build request body matching backend schema
-    const requestBody = {
-      patient_info: {
-        age: parseInt(patientInfo.age),
-        sex: patientInfo.sex,
-        ethnicity: null,
-        personal_cancer_history: false,
-      },
-      family_members: validEntries.map((entry) => ({
-        name: entry.name || entry.relationshipLabel,
-        relationship: entry.relationship,
-        cancer_type: entry.cancerType,
-        age_at_diagnosis: parseInt(entry.ageAtDiagnosis),
-        current_age: null,
-        is_alive: true,
-      })),
-    }
+    setIsGenerating(true)
+    setError(null)
 
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/analyze-family-history?patient_name=${encodeURIComponent(patientInfo.name)}`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(requestBody),
-        }
-      )
+      const convertedMembers: FamilyMember[] = validMembers.map(m => ({
+        id: m.id,
+        relationship: m.relationship,
+        cancerType: m.cancerType,
+        ageAtDiagnosis: typeof m.ageAtDiagnosis === "number" ? m.ageAtDiagnosis : parseInt(m.ageAtDiagnosis as any),
+      }))
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(errorData.detail || `Server error: ${response.status}`)
-      }
-
-      const data: RiskReport = await response.json()
-      setSubmittedPatient({ ...patientInfo })
-      setReport(data)
+      const recs = generateRecommendations(patientInfo, convertedMembers)
+      setRecommendations(recs)
     } catch (err) {
-      console.error("[v0] API Error:", err)
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Failed to analyze family history. Please try again."
-      )
+      console.error(err)
+      setError("Failed to generate recommendations. Please try again.")
     } finally {
-      setIsSubmitting(false)
+      setIsGenerating(false)
     }
   }
 
-  const resetForm = () => {
-    setReport(null)
-    setSubmittedPatient(null)
-    setError(null)
-    setPatientInfo({ name: "", age: "", sex: "" })
-    setEntries([
-      { id: generateEntryId(), name: "", relationship: "", relationshipLabel: "", cancerType: "", ageAtDiagnosis: "" },
-    ])
+  const handlePrint = () => {
+    window.print()
   }
 
-  // Show report if available
-  if (report) {
-    const riskColor = (level: string) => {
-      if (level === "high" || level === "very_high") return { text: "#DC2626", bg: "#FEE2E2", border: "#FCA5A5", label: "High Risk" }
-      if (level === "moderate") return { text: "#CA8A04", bg: "#FEF9C3", border: "#FDE047", label: "Moderate Risk" }
-      return { text: "#16A34A", bg: "#DCFCE7", border: "#86EFAC", label: "Low Risk" }
-    }
-    const riskPct = (level: string) => {
-      if (level === "high" || level === "very_high") return "80%"
-      if (level === "moderate") return "55%"
-      return "25%"
-    }
-
-    return (
-      <div style={{ background: "#f8fafc", borderRadius: 16, overflow: "hidden" }}>
-        {/* Navy header */}
-        <div style={{
-          background: "linear-gradient(135deg, #0A1F44 0%, #112A5C 55%, #1E3A8A 100%)",
-          color: "white", padding: "32px 36px",
-          position: "relative", overflow: "hidden",
-        }}>
-          <div style={{
-            position: "absolute", inset: 0,
-            backgroundImage: "linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px)",
-            backgroundSize: "32px 32px", opacity: 0.5,
-          }} />
-          <div style={{ position: "relative" }}>
-            <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.2em", color: "#93C5FD" }}>CLINICAL SCREENING REPORT</div>
-            <h2 style={{ fontFamily: "'Georgia', serif", fontSize: 34, fontWeight: 600, letterSpacing: "-0.02em", margin: "8px 0 6px" }}>
-              {report.patient_name}&apos;s risk profile
-            </h2>
-            <div style={{ fontSize: 13, color: "#cbd5e1" }}>
-              📅 {new Date(report.generated_date).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}
-            </div>
-          </div>
-          <div style={{
-            position: "relative", marginTop: 26, paddingTop: 20,
-            borderTop: "0.5px solid rgba(255,255,255,0.15)",
-            display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 20,
-          }}>
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.1em", color: "#94a3b8" }}>Age</div>
-              <div style={{ fontFamily: "'Georgia', serif", fontSize: 24, fontWeight: 600, marginTop: 4 }}>
-                {submittedPatient?.age ?? "—"}
-              </div>
-            </div>
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.1em", color: "#94a3b8" }}>Sex</div>
-              <div style={{ fontFamily: "'Georgia', serif", fontSize: 24, fontWeight: 600, marginTop: 4 }}>
-                {submittedPatient?.sex ? submittedPatient.sex.charAt(0).toUpperCase() + submittedPatient.sex.slice(1) : "—"}
-              </div>
-            </div>
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.1em", color: "#94a3b8" }}>Conditions</div>
-              <div style={{ fontFamily: "'Georgia', serif", fontSize: 24, fontWeight: 600, marginTop: 4 }}>{report.recommendations.length}</div>
-            </div>
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.1em", color: "#94a3b8" }}>Elevated</div>
-              <div style={{ fontFamily: "'Georgia', serif", fontSize: 24, fontWeight: 600, marginTop: 4, color: "#FCA5A5" }}>
-                {report.recommendations.filter(r => r.risk_level === "high" || r.risk_level === "very_high").length}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* White body */}
-        <div style={{ background: "white", padding: "32px 36px", border: "0.5px solid #e2e8f0", borderTop: 0 }}>
-          {/* Overall summary */}
-          <div style={{ marginBottom: 28 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-              <div style={{ width: 28, height: 28, background: "#0A1F44", borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center", color: "white" }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-                </svg>
-              </div>
-              <h3 style={{ fontFamily: "'Georgia', serif", fontSize: 20, fontWeight: 600, color: "#0A1F44", margin: 0 }}>Overall Risk Summary</h3>
-            </div>
-            <div style={{ border: "0.5px solid rgba(37,99,235,0.15)", background: "#EFF6FF", borderRadius: 12, padding: 18 }}>
-              <p style={{ fontSize: 14, lineHeight: 1.6, color: "#334155", margin: 0 }}>{report.overall_risk_summary}</p>
-            </div>
-          </div>
-
-          {/* Screening Recommendations */}
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-            <div style={{ width: 28, height: 28, background: "#0A1F44", borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center", color: "white" }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5z" />
-                <path d="M14 2v6h6" />
-              </svg>
-            </div>
-            <h3 style={{ fontFamily: "'Georgia', serif", fontSize: 20, fontWeight: 600, color: "#0A1F44", margin: 0 }}>Screening Recommendations</h3>
-          </div>
-
-          {report.recommendations.map((rec, index) => {
-            const colors = riskColor(rec.risk_level)
-            const pct = riskPct(rec.risk_level)
-            return (
-              <div key={index} style={{ border: "0.5px solid #e2e8f0", borderRadius: 14, padding: 24, marginBottom: 14 }}>
-                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
-                  <div>
-                    <div style={{ fontFamily: "'Georgia', serif", fontSize: 20, fontWeight: 600, color: "#0A1F44" }}>
-                      {rec.cancer_type.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())} Cancer
-                    </div>
-                    <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{rec.screening_method}</div>
-                  </div>
-                  <div style={{
-                    borderRadius: 999, padding: "4px 12px",
-                    fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em",
-                    color: colors.text, background: colors.bg, border: `0.5px solid ${colors.border}`,
-                  }}>
-                    {colors.label}
-                  </div>
-                </div>
-
-                {/* Risk meter */}
-                <div style={{ marginTop: 20 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 11, color: "#64748b", fontWeight: 500 }}>
-                    <span>Risk Level</span>
-                    <span style={{ display: "flex", gap: 12 }}>
-                      {[["#16A34A", "Low"], ["#CA8A04", "Mod"], ["#DC2626", "High"]].map(([c, l]) => (
-                        <span key={l} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <span style={{ width: 6, height: 6, borderRadius: "50%", background: c, display: "inline-block" }} />{l}
-                        </span>
-                      ))}
-                    </span>
-                  </div>
-                  <div style={{ height: 10, background: "#f1f5f9", borderRadius: 999, overflow: "hidden" }}>
-                    <div style={{ width: pct, height: "100%", background: `linear-gradient(90deg, ${colors.text}cc 0%, ${colors.text} 100%)`, borderRadius: 999 }} />
-                  </div>
-                </div>
-
-                {/* Age comparison */}
-                {(() => {
-                  const uspstfAge = rec.cancer_type === "breast" ? 40 : rec.cancer_type === "colorectal" ? 45 : rec.cancer_type === "lung" ? 50 : null
-                  const yearsEarlier = uspstfAge && rec.recommended_age_start < uspstfAge ? uspstfAge - rec.recommended_age_start : null
-                  return (
-                    <div style={{ marginTop: 22, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-                      <div style={{ background: "#f8fafc", border: "0.5px solid #e2e8f0", borderRadius: 10, padding: "14px 16px" }}>
-                        <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.1em", color: "#64748b" }}>USPSTF Standard</div>
-                        <div style={{ marginTop: 4, display: "flex", alignItems: "baseline", gap: 8 }}>
-                          <span style={{
-                            fontFamily: "'Georgia', serif", fontSize: 32, fontWeight: 600, color: "#94a3b8",
-                            textDecoration: yearsEarlier ? "line-through" : "none",
-                            textDecorationColor: "#94a3b8",
-                            textDecorationThickness: 2,
-                          }}>
-                            {uspstfAge ?? "—"}
-                          </span>
-                          <span style={{ fontSize: 12, color: "#64748b" }}>years old</span>
-                        </div>
-                      </div>
-                      <div style={{ background: "#EFF6FF", border: "0.5px solid #BFDBFE", borderRadius: 10, padding: "14px 16px" }}>
-                        <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.1em", color: "#2563EB" }}>Your Personalized Age</div>
-                        <div style={{ marginTop: 4, display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-                          <span style={{ fontFamily: "'Georgia', serif", fontSize: 32, fontWeight: 700, color: "#2563EB" }}>{rec.recommended_age_start}</span>
-                          <span style={{ fontSize: 12, color: "#64748b" }}>years old</span>
-                          {yearsEarlier && (
-                            <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 600, color: "#2563EB", background: "white", border: "0.5px solid #BFDBFE", borderRadius: 999, padding: "2px 10px" }}>
-                              {yearsEarlier} yrs earlier
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })()}
-
-                <div style={{ marginTop: 18, paddingTop: 18, borderTop: "0.5px solid #e2e8f0", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, fontSize: 13 }}>
-                  <div><span style={{ color: "#64748b" }}>Frequency: </span><span style={{ fontWeight: 500, color: "#0A1F44" }}>{rec.screening_frequency}</span></div>
-                  <div><span style={{ color: "#64748b" }}>Method: </span><span style={{ fontWeight: 500, color: "#0A1F44" }}>{rec.screening_method}</span></div>
-                </div>
-              </div>
-            )
-          })}
-
-          {/* Next Steps */}
-          {report.next_steps.length > 0 && (
-            <div style={{ marginTop: 8, marginBottom: 24 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-                <div style={{ width: 28, height: 28, background: "#0A1F44", borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center", color: "white" }}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M9 11l3 3 8-8" /><path d="M20 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h11" />
-                  </svg>
-                </div>
-                <h3 style={{ fontFamily: "'Georgia', serif", fontSize: 20, fontWeight: 600, color: "#0A1F44", margin: 0 }}>Recommended Next Steps</h3>
-              </div>
-              <ul style={{ paddingLeft: 20, margin: 0 }}>
-                {report.next_steps.map((step, i) => (
-                  <li key={i} style={{ fontSize: 14, color: "#334155", lineHeight: 1.7, marginBottom: 4 }}>{step}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* Actions */}
-          <div style={{ marginTop: 32, display: "flex", gap: 12 }}>
-            <button
-              onClick={() => window.print()}
-              style={{ flex: 1, height: 44, background: "white", border: "0.5px solid #e2e8f0", color: "#0A1F44", borderRadius: 10, fontSize: 14, fontWeight: 500, cursor: "pointer" }}
-            >
-              🖨 Print Report
-            </button>
-            <button
-              onClick={resetForm}
-              style={{ flex: 1, height: 44, background: "#0A1F44", border: 0, color: "white", borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: "pointer" }}
-            >
-              ↻ New Assessment
-            </button>
-          </div>
-
-          <div style={{ marginTop: 16, padding: 14, background: "#f8fafc", borderRadius: 10, border: "0.5px solid #e2e8f0" }}>
-            <p style={{ fontSize: 12, color: "#64748b", margin: 0 }}>{report.disclaimer}</p>
-          </div>
-        </div>
-      </div>
-    )
+  const handleReadAloud = () => {
+    if (!recommendations) return
+    
+    const reportText = recommendations.map(rec => {
+      return `${rec.cancerType.toUpperCase()} Cancer: ${rec.riskLevel} risk. Start screening at age ${rec.personalizedStartAge}. ${rec.frequency}. ${rec.method}. ${rec.rationale}`
+    }).join(". ")
+    
+    const utterance = new SpeechSynthesisUtterance(reportText)
+    utterance.rate = 0.9
+    window.speechSynthesis.cancel()
+    window.speechSynthesis.speak(utterance)
   }
 
   return (
-    <form onSubmit={handleSubmit}>
-      <Card className="border-primary/20">
-        <CardHeader>
-          <CardTitle className="text-xl text-foreground">Family Cancer History</CardTitle>
-          <CardDescription>
-            Please provide your information and details about family members who have been diagnosed with cancer.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {/* Error Message */}
-          {error && (
-            <div className="flex items-start gap-3 rounded-lg border border-destructive/20 bg-destructive/5 p-4">
-              <AlertCircle className="mt-0.5 size-5 shrink-0 text-destructive" />
-              <p className="text-sm text-destructive">{error}</p>
-            </div>
-          )}
-
-          {/* Patient Information */}
-          <div className="rounded-lg border border-border bg-muted/30 p-4">
-            <div className="mb-3 text-sm font-medium text-foreground">Your Information</div>
-            <div className="grid gap-4 sm:grid-cols-3">
-              <div className="space-y-2">
-                <Label htmlFor="patient-name">Your Name</Label>
+    <div className="space-y-8">
+      <form onSubmit={handleSubmit} className="space-y-8">
+        <Card>
+          <CardHeader>
+            <CardTitle>Your Information</CardTitle>
+            <CardDescription>Tell us about yourself</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <Label htmlFor="name">Full Name</Label>
                 <Input
-                  id="patient-name"
-                  type="text"
-                  placeholder="Enter your name"
+                  id="name"
+                  placeholder="e.g., Sarah Johnson"
                   value={patientInfo.name}
                   onChange={(e) => setPatientInfo({ ...patientInfo, name: e.target.value })}
-                  className="bg-card"
-                  required
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="patient-age">Your Age</Label>
+              <div>
+                <Label htmlFor="age">Your Age</Label>
                 <Input
-                  id="patient-age"
+                  id="age"
                   type="number"
-                  min="0"
-                  max="120"
-                  placeholder="Enter your age"
-                  value={patientInfo.age}
-                  onChange={(e) => setPatientInfo({ ...patientInfo, age: e.target.value })}
-                  className="bg-card"
-                  required
+                  placeholder="e.g., 32"
+                  value={patientInfo.age || ""}
+                  onChange={(e) => setPatientInfo({ ...patientInfo, age: parseInt(e.target.value) || 0 })}
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="patient-sex">Biological Sex</Label>
+              <div>
+                <Label htmlFor="sex">Biological Sex</Label>
                 <Select
                   value={patientInfo.sex}
-                  onValueChange={(value) => setPatientInfo({ ...patientInfo, sex: value })}
+                  onValueChange={(val) => setPatientInfo({ ...patientInfo, sex: val as "male" | "female" | "other" })}
                 >
-                  <SelectTrigger id="patient-sex" className="w-full bg-card">
+                  <SelectTrigger>
                     <SelectValue placeholder="Select sex" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="male">Male</SelectItem>
                     <SelectItem value="female">Female</SelectItem>
+                    <SelectItem value="male">Male</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
             </div>
-          </div>
+          </CardContent>
+        </Card>
 
-          {/* Family Members */}
-          {entries.map((entry, index) => (
-            <div
-              key={entry.id}
-              className="relative rounded-lg border border-border bg-muted/30 p-4"
-            >
-              {entries.length > 1 && (
-                <button
-                  type="button"
-                  onClick={() => removeEntry(entry.id)}
-                  className="absolute right-3 top-3 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                  aria-label="Remove family member"
-                >
-                  <Trash2 className="size-4" />
-                </button>
-              )}
-
-              <div className="mb-3 text-sm font-medium text-muted-foreground">
-                Family Member {index + 1}
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-3">
-                <div className="space-y-2">
-                  <Label htmlFor={`${formId}-relationship-${index}`}>Relationship</Label>
+        <Card>
+          <CardHeader>
+            <CardTitle>Family Cancer History</CardTitle>
+            <CardDescription>Add any blood relatives who have been diagnosed with cancer</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {familyMembers.map((member, idx) => (
+              <div key={member.id} className="p-4 border rounded-lg space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-medium text-muted-foreground">Relative #{idx + 1}</span>
+                  {familyMembers.length > 1 && (
+                    <Button type="button" variant="ghost" size="sm" onClick={() => removeFamilyMember(member.id)}>
+                      <Trash2 className="size-4 text-red-500" />
+                    </Button>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <Select
-                    value={entry.relationshipLabel}
-                    onValueChange={(value) => updateRelationship(entry.id, value)}
+                    value={member.relationship}
+                    onValueChange={(val: Relationship) => updateFamilyMember(member.id, "relationship", val)}
                   >
-                    <SelectTrigger id={`${formId}-relationship-${index}`} className="w-full bg-card">
-                      <SelectValue placeholder="Select relationship" />
+                    <SelectTrigger>
+                      <SelectValue placeholder="Relationship" />
                     </SelectTrigger>
                     <SelectContent>
-                      {RELATIONSHIPS.map((rel) => (
-                        <SelectItem key={rel.label} value={rel.label}>
-                          {rel.label}
-                        </SelectItem>
+                      {RELATIONSHIP_OPTIONS.map(opt => (
+                        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor={`${formId}-cancer-${index}`}>Cancer Type</Label>
                   <Select
-                    value={entry.cancerType}
-                    onValueChange={(value) => updateEntry(entry.id, "cancerType", value)}
+                    value={member.cancerType}
+                    onValueChange={(val: CancerType) => updateFamilyMember(member.id, "cancerType", val)}
                   >
-                    <SelectTrigger id={`${formId}-cancer-${index}`} className="w-full bg-card">
-                      <SelectValue placeholder="Select cancer type" />
+                    <SelectTrigger>
+                      <SelectValue placeholder="Cancer type" />
                     </SelectTrigger>
                     <SelectContent>
-                      {CANCER_TYPES.map((type) => (
-                        <SelectItem key={type.value} value={type.value}>
-                          {type.label}
-                        </SelectItem>
+                      {CANCER_OPTIONS.map(opt => (
+                        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor={`${formId}-age-${index}`}>Age at Diagnosis</Label>
                   <Input
-                    id={`${formId}-age-${index}`}
                     type="number"
-                    min="0"
-                    max="120"
-                    placeholder="Enter age"
-                    value={entry.ageAtDiagnosis}
-                    onChange={(e) => updateEntry(entry.id, "ageAtDiagnosis", e.target.value)}
-                    className="bg-card"
+                    placeholder="Age at diagnosis"
+                    value={member.ageAtDiagnosis || ""}
+                    onChange={(e) => updateFamilyMember(member.id, "ageAtDiagnosis", parseInt(e.target.value) || "")}
                   />
                 </div>
               </div>
-            </div>
-          ))}
-
-          <Button
-            type="button"
-            variant="outline"
-            onClick={addEntry}
-            className="w-full border-dashed border-primary/40 text-primary hover:border-primary hover:bg-primary/5"
-          >
-            <Plus className="size-4" />
-            Add Another Family Member
-          </Button>
-
-          <div className="pt-4">
-            <Button type="submit" size="lg" className="w-full" disabled={isSubmitting}>
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" />
-                  Analyzing...
-                </>
-              ) : (
-                "Submit Family History"
-              )}
+            ))}
+            <Button type="button" variant="outline" onClick={addFamilyMember} className="w-full">
+              <Plus className="size-4 mr-2" />
+              Add Another Family Member
             </Button>
+          </CardContent>
+        </Card>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
+            {error}
           </div>
-        </CardContent>
-      </Card>
-    </form>
+        )}
+
+        <Button type="submit" disabled={isGenerating} className="w-full bg-[#0A1F44] hover:bg-[#1E3A8A]">
+          {isGenerating ? "Generating Your Report..." : "Generate My Screening Report"}
+        </Button>
+      </form>
+
+      {recommendations && recommendations.length > 0 && (
+        <div className="space-y-6">
+          <div className="flex flex-wrap justify-between items-center gap-4">
+            <h2 className="text-2xl font-bold text-[#0A1F44]">Your Personalized Screening Report</h2>
+            <div className="flex gap-3">
+              <Button onClick={handleReadAloud} variant="outline">🔊 Read Aloud</Button>
+              <Button onClick={handlePrint} variant="outline"><Printer className="size-4 mr-2" /> Print</Button>
+            </div>
+          </div>
+
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <p className="font-medium text-blue-800">Report for: {patientInfo.name} (Age {patientInfo.age})</p>
+            <p className="text-sm text-blue-700">Generated on {new Date().toLocaleDateString()}</p>
+          </div>
+
+          <div className="grid gap-4">
+            {recommendations.map((rec) => {
+              const riskColor = getRiskColor(rec.riskLevel)
+              return (
+                <Card key={rec.cancerType} className="overflow-hidden">
+                  <div className="h-1" style={{ background: riskColor }} />
+                  <CardHeader className="pb-2">
+                    <div className="flex justify-between items-center">
+                      <CardTitle className="capitalize text-xl">{rec.cancerType} Cancer</CardTitle>
+                      <span className="px-3 py-1 rounded-full text-sm font-medium text-white" style={{ backgroundColor: riskColor }}>
+                        {rec.riskLevel} Risk
+                      </span>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div>
+                      <div className="flex justify-between text-sm mb-1">
+                        <span>Risk Level</span>
+                        <span>{rec.riskPercentage}%</span>
+                      </div>
+                      <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                        <div className="h-full rounded-full" style={{ width: `${rec.riskPercentage}%`, backgroundColor: riskColor }} />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4 p-3 bg-gray-50 rounded-lg">
+                      <div>
+                        <div className="text-xs text-gray-500">USPSTF Standard Age</div>
+                        <div className="text-xl font-bold">Age {rec.standardStartAge}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-gray-500">Your Personalized Age</div>
+                        <div className="text-xl font-bold" style={{ color: riskColor }}>Age {rec.personalizedStartAge}</div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div><span className="font-medium">Frequency:</span> {rec.frequency}</div>
+                      <div><span className="font-medium">Method:</span> {rec.method}</div>
+                    </div>
+
+                    <div className="p-3 bg-gray-50 rounded-lg">
+                      <p className="text-sm text-gray-700">{rec.rationale}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+              )
+            })}
+          </div>
+
+          <div className="text-center text-xs text-gray-400 pt-4">
+            This report is for informational purposes only and is not a substitute for professional medical advice.
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
