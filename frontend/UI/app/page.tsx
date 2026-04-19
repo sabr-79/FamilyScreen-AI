@@ -5,6 +5,7 @@ import { FamilyHistoryForm } from "@/components/family-history-form"
 import { HealthAssistant } from "@/components/health-assistant"
 import { UpgradeButton } from "@/components/upgrade-button"
 import { SponsorsSection } from "@/components/sponsors-section"
+import { VoiceGuidedFormExample } from "@/components/voice-guided-form-example"
 
 export default function FamilyScreenAI() {
   const isPremium = false
@@ -241,6 +242,23 @@ export default function FamilyScreenAI() {
               </div>
             ))}
           </div>
+        </div>
+      </section>
+
+      {/* ── VOICE TEST SECTION (DEMO) ── */}
+      <section style={{ background: "white", padding: "56px 48px" }}>
+        <div style={{ maxWidth: 780, margin: "0 auto" }}>
+          <div style={{ textAlign: "center", marginBottom: 36 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.14em", color: "#2563EB" }}>🎙️ Voice Demo</div>
+            <h2 style={{ fontFamily: "'Georgia', serif", fontSize: 42, fontWeight: 600, color: "#0A1F44", margin: "12px 0 16px", letterSpacing: "-0.02em" }}>
+              Try Voice-Guided Input
+            </h2>
+            <p style={{ color: "#64748b", fontSize: 15, margin: 0 }}>
+              AI reads questions out loud. You can respond by voice or typing.
+            </p>
+          </div>
+
+          <VoiceGuidedFormExample />
         </div>
       </section>
 

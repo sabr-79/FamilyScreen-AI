@@ -48,7 +48,6 @@ export function SponsorsSection() {
       logoFallback: "🎙️",
       url: "https://elevenlabs.io",
       logoBg: "#000000",
-      comingSoon: true,
       useEmoji: false,
     },
     {

@@ -1,5 +1,5 @@
 from typing import Annotated, List, Optional
-from fastapi import FastAPI, HTTPException, Depends, Query, Body, Request
+from fastapi import FastAPI, HTTPException, Depends, Query, Body, Request, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import httpx
@@ -9,6 +9,7 @@ from enum import Enum
 import os
 from dotenv import load_dotenv
 from stripe_integration import StripeService
+from elevenlabs_integration import transcribe_audio, text_to_speech
 
 load_dotenv()
 
@@ -219,6 +220,70 @@ async def stripe_webhook(request: Request):
         
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+# Speech-to-Text Endpoint (ElevenLabs Scribe v2)
+@app.post("/transcribe-audio")
+async def transcribe_audio_endpoint(
+    audio: UploadFile = File(..., description="Audio file to transcribe (webm, mp3, wav, etc.)")
+):
+    """
+    Transcribe audio to text using ElevenLabs Scribe v2 Speech-to-Text API.
+    Useful for voice input in family history forms and health assistant.
+    
+    Scribe v2 supports 90+ languages with high accuracy.
+    """
+    try:
+        print(f"🎤 Received audio file: {audio.filename}, content_type: {audio.content_type}")
+        
+        # Read audio file
+        audio_bytes = await audio.read()
+        print(f"📊 Audio size: {len(audio_bytes)} bytes")
+        
+        if not audio_bytes:
+            raise HTTPException(status_code=400, detail="Empty audio file")
+        
+        # Transcribe using ElevenLabs Scribe v2
+        print("🔄 Calling ElevenLabs STT API...")
+        result = await transcribe_audio(audio_bytes, audio.filename or "audio.webm")
+        print(f"✅ STT result: {result}")
+        
+        if result.get("error"):
+            print(f"❌ STT error: {result['error']}")
+            raise HTTPException(status_code=500, detail=result["error"])
+        
+        return {
+            "text": result["text"],
+            "success": True,
+            "filename": audio.filename
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Transcription exception: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
+
+# Text-to-Speech Endpoint (ElevenLabs)
+@app.post("/text-to-speech")
+async def text_to_speech_endpoint(
+    text: Annotated[str, Body(description="Text to convert to speech")],
+    voice_id: Annotated[str, Body(description="ElevenLabs voice ID")] = "21m00Tcm4TlvDq8ikWAM"
+):
+    """
+    Convert text to speech using ElevenLabs TTS.
+    Returns audio bytes that can be played in the browser.
+    """
+    try:
+        audio_bytes = await text_to_speech(text, voice_id)
+        
+        if not audio_bytes:
+            raise HTTPException(status_code=500, detail="Failed to generate speech")
+        
+        from fastapi.responses import Response
+        return Response(content=audio_bytes, media_type="audio/mpeg")
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"TTS failed: {str(e)}")
 
 # Premium Feature: AI Health Assistant
 @app.post("/analyze-symptoms")
